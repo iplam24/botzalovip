@@ -1,0 +1,39 @@
+# Môi trường & bí mật
+.env
+.env.*
+!.env.example
+.secrets/
+
+# Cơ sở dữ liệu local
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+dist/
+
+# Sao lưu
+backups/*.zip
+backend/backups/*.zip
+
+# Zalo cá nhân: session/credentials/QR - TUYỆT ĐỐI không commit
+connectors/zalo-personal/data/*
+!connectors/zalo-personal/data/.gitkeep
+connectors/zalo-personal/.env
+
+# Hệ điều hành / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Artefact tsc trong src (build ra dist/)
+frontend/src/**/*.js
+tsconfig.tsbuildinfo

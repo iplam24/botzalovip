@@ -1,0 +1,27 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment: {POSTGRES_USER: zalo, POSTGRES_PASSWORD: zalo_password_local, POSTGRES_DB: zalo_ai_hub}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U zalo"], interval: 5s, timeout: 3s, retries: 10}
+  redis:
+    image: redis:7
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 10}
+  backend:
+    build: ./backend
+    environment: {DATABASE_URL: "postgresql://zalo:zalo_password_local@db:5432/zalo_ai_hub", SECRET_KEY: "doi-secret-nay-trong-production", ADMIN_EMAIL: "admin@local", ADMIN_PASSWORD: "Admin@12345"}
+    ports: ["8000:8000"]
+    depends_on: {db: {condition: service_healthy}, redis: {condition: service_healthy}}
+    volumes: [./backups:/app/backups]
+  zalo-personal:
+    build: ./connectors/zalo-personal
+    profiles: ["zalo"]
+    environment: {PORT: "8791", BACKEND_URL: "http://backend:8000", CONNECTOR_SECRET: ""}
+    ports: ["8791:8791"]
+    volumes: [./connectors/zalo-personal/data:/app/data]
+    depends_on: [backend]
+  frontend:
+    build: ./frontend
+    ports: ["5173:5173"]
+    depends_on: [backend]
+volumes: {pgdata: {}}

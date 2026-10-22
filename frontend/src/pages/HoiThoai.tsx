@@ -1,0 +1,264 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, dinhDangThoiGian } from "../lib/api";
+import { ChuaCoDuLieu, DangTai, HuyHieuTrangThai, LoiTai, Nut, ThongBao, TieuDeTrang, oNhap } from "../components/dungChung";
+
+// Hộp thư hội thoại 2 cột:
+// - Trái: danh sách hội thoại (tên khách, tin gần nhất, trạng thái, bot/nhân viên), tìm kiếm + lọc trạng thái.
+// - Phải: khung chat theo thời gian (khách/bot/nhân viên/hệ thống), gửi tin thủ công,
+//   Tạm dừng bot / Bật lại bot / Chuyển nhân viên / Trả lại bot / Đổi trạng thái xử lý.
+
+const NHAN_NGUOI_GUI: Record<string, string> = {
+  khach: "Khách hàng",
+  bot: "Bot tự động",
+  nhan_vien: "Nhân viên",
+  he_thong: "Hệ thống",
+};
+
+export default function HoiThoai() {
+  const [danhSach, setDanhSach] = useState<any[]>([]);
+  const [dangTai, setDangTai] = useState(true);
+  const [loi, setLoi] = useState("");
+  const [tuKhoa, setTuKhoa] = useState("");
+  const [locTrangThai, setLocTrangThai] = useState("");
+  const [dangChonId, setDangChonId] = useState<number | null>(null);
+  const [chiTiet, setChiTiet] = useState<any>(null);
+  const [dangTaiChiTiet, setDangTaiChiTiet] = useState(false);
+  const [noiDungGui, setNoiDungGui] = useState("");
+  const [dangGui, setDangGui] = useState(false);
+  const [thongBao, setThongBao] = useState<{ loai: "thanh_cong" | "loi"; text: string } | null>(null);
+  const cuoiChatRef = useRef<HTMLDivElement>(null);
+
+  const taiDanhSach = useCallback(async () => {
+    setDangTai(true);
+    setLoi("");
+    try {
+      const thamSo = new URLSearchParams();
+      if (locTrangThai) thamSo.set("trang_thai", locTrangThai);
+      if (tuKhoa.trim()) thamSo.set("tu_khoa", tuKhoa.trim());
+      const ds = await api(`/api/hoi-thoai?${thamSo.toString()}`);
+      setDanhSach(ds);
+      if (dangChonId === null && ds.length > 0) setDangChonId(ds[0].id);
+    } catch (e: any) {
+      setLoi(e.message);
+    } finally {
+      setDangTai(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locTrangThai, tuKhoa]);
+
+  useEffect(() => {
+    const t = setTimeout(taiDanhSach, tuKhoa ? 350 : 0);
+    return () => clearTimeout(t);
+  }, [taiDanhSach, tuKhoa]);
+
+  const taiChiTiet = useCallback(async (id: number) => {
+    setDangTaiChiTiet(true);
+    try {
+      setChiTiet(await api(`/api/hoi-thoai/${id}`));
+    } catch (e: any) {
+      setThongBao({ loai: "loi", text: `Không tải được hội thoại: ${e.message}` });
+    } finally {
+      setDangTaiChiTiet(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (dangChonId !== null) taiChiTiet(dangChonId);
+  }, [dangChonId, taiChiTiet]);
+
+  useEffect(() => {
+    cuoiChatRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [chiTiet?.messages?.length]);
+
+  const thaoTac = async (duongDan: string, thanhCong: string, body?: any) => {
+    if (dangChonId === null) return;
+    try {
+      await api(duongDan, { method: "POST", body: body ? JSON.stringify(body) : undefined });
+      setThongBao({ loai: "thanh_cong", text: thanhCong });
+      await Promise.all([taiChiTiet(dangChonId), taiDanhSach()]);
+    } catch (e: any) {
+      setThongBao({ loai: "loi", text: e.message });
+    }
+  };
+
+  const guiTin = async () => {
+    if (dangChonId === null || !noiDungGui.trim()) return;
+    setDangGui(true);
+    try {
+      await api(`/api/hoi-thoai/${dangChonId}/gui-tin-nhan`, {
+        method: "POST",
+        body: JSON.stringify({ content: noiDungGui.trim(), sender_type: "nhan_vien" }),
+      });
+      setNoiDungGui("");
+      await taiChiTiet(dangChonId);
+    } catch (e: any) {
+      setThongBao({ loai: "loi", text: e.message });
+    } finally {
+      setDangGui(false);
+    }
+  };
+
+  return (
+    <div className="p-6">
+      <TieuDeTrang tieuDe="Hội thoại" moTa="Hộp thư hội thoại thật từ hệ thống. Bot tự dừng khi nhân viên tiếp quản.">
+        <Nut mau="xam" onClick={taiDanhSach}>Làm mới</Nut>
+      </TieuDeTrang>
+      {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
+
+      <div className="grid lg:grid-cols-[360px_1fr] gap-4 items-start">
+        {/* Cột trái — danh sách */}
+        <section className="bg-white dark:bg-neutral-900 rounded shadow">
+          <div className="p-3 border-b space-y-2">
+            <input className={oNhap} placeholder="Tìm theo tên khách hoặc nội dung tin nhắn..."
+              value={tuKhoa} onChange={(e) => setTuKhoa(e.target.value)} />
+            <select className={oNhap} value={locTrangThai} onChange={(e) => setLocTrangThai(e.target.value)}>
+              <option value="">Tất cả trạng thái</option>
+              <option value="dang_xu_ly">Đang xử lý</option>
+              <option value="cho_phan_hoi">Chờ phản hồi</option>
+              <option value="da_giai_quyet">Đã giải quyết</option>
+            </select>
+          </div>
+          <div className="max-h-[70vh] overflow-y-auto">
+            {dangTai ? (
+              <DangTai text="Đang tải hội thoại..." />
+            ) : loi ? (
+              <LoiTai loi={loi} onThuLai={taiDanhSach} />
+            ) : danhSach.length === 0 ? (
+              <p className="p-4 text-sm text-gray-500">Chưa có hội thoại nào khớp bộ lọc.</p>
+            ) : (
+              danhSach.map((c) => (
+                <button key={c.id} onClick={() => setDangChonId(c.id)}
+                  className={`block w-full text-left px-3.5 py-3 border-b hover:bg-gray-50 dark:hover:bg-neutral-800 ${dangChonId === c.id ? "bg-blue-50 dark:bg-neutral-800" : ""}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium truncate">{c.customer_name || `Khách hàng #${c.customer_id}`}</span>
+                    <span className="text-xs text-gray-400 whitespace-nowrap">{dinhDangThoiGian(c.last_message_at || c.updated_at)}</span>
+                  </div>
+                  <p className="text-sm text-gray-500 truncate mt-0.5">{c.last_message || "Chưa có tin nhắn"}</p>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5 items-center">
+                    <HuyHieuTrangThai giaTri={c.status} />
+                    {c.human_takeover
+                      ? <span className="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full">Nhân viên tiếp quản</span>
+                      : c.bot_enabled
+                        ? <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">Bot đang bật</span>
+                        : <span className="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full">Bot đã tạm dừng</span>}
+                    {c.labels && <span className="text-xs text-gray-500">🏷 {c.labels}</span>}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
+
+        {/* Cột phải — khung chat */}
+        <section className="bg-white dark:bg-neutral-900 rounded shadow flex flex-col min-h-[70vh]">
+          {dangChonId === null ? (
+            <div className="p-6"><ChuaCoDuLieu text="Chưa có hội thoại nào. Hội thoại sẽ xuất hiện khi khách nhắn tin qua Zalo (hoặc qua kênh mô phỏng khi kiểm thử)." /></div>
+          ) : dangTaiChiTiet && !chiTiet ? (
+            <DangTai text="Đang tải tin nhắn..." />
+          ) : !chiTiet ? (
+            <p className="p-6 text-gray-500">Chọn một hội thoại ở cột trái để xem nội dung.</p>
+          ) : (
+            <>
+              <div className="p-4 border-b">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-bold">{chiTiet.customer_name || `Khách hàng #${chiTiet.customer_id}`}</p>
+                    <p className="text-xs text-gray-500">
+                      {chiTiet.customer_phone && <>Số điện thoại: {chiTiet.customer_phone} · </>}
+                      Ưu tiên: {chiTiet.priority || "trung_binh"}
+                      {chiTiet.assignee && <> · Phụ trách: {chiTiet.assignee}</>}
+                    </p>
+                  </div>
+                  <HuyHieuTrangThai giaTri={chiTiet.status} />
+                </div>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {chiTiet.bot_enabled && !chiTiet.human_takeover ? (
+                    <Nut mau="xam" onClick={() => thaoTac(`/api/hoi-thoai/${chiTiet.id}/tam-dung-bot`, "Đã tạm dừng bot cho hội thoại này.")}>
+                      Tạm dừng bot
+                    </Nut>
+                  ) : (
+                    <Nut mau="xam" onClick={() => thaoTac(`/api/hoi-thoai/${chiTiet.id}/tra-lai-bot`, "Đã bật lại bot và trả quyền xử lý cho bot.")}>
+                      Trả lại cho bot
+                    </Nut>
+                  )}
+                  {!chiTiet.human_takeover && (
+                    <Nut mau="xam" onClick={() => thaoTac(`/api/hoi-thoai/${chiTiet.id}/chuyen-nhan-vien`, "Đã chuyển hội thoại cho nhân viên. Bot sẽ không tự trả lời nữa.")}>
+                      Chuyển nhân viên
+                    </Nut>
+                  )}
+                  {chiTiet.status !== "da_giai_quyet" ? (
+                    <Nut mau="xam" onClick={() => thaoTac(`/api/hoi-thoai/${chiTiet.id}/doi-trang-thai`, "Đã đánh dấu hội thoại là đã giải quyết.", { status: "da_giai_quyet" })}>
+                      Đánh dấu đã giải quyết
+                    </Nut>
+                  ) : (
+                    <Nut mau="xam" onClick={() => thaoTac(`/api/hoi-thoai/${chiTiet.id}/doi-trang-thai`, "Đã mở lại hội thoại.", { status: "dang_xu_ly" })}>
+                      Mở lại hội thoại
+                    </Nut>
+                  )}
+                </div>
+                {chiTiet.human_takeover && (
+                  <p className="text-xs text-purple-700 bg-purple-50 border border-purple-200 rounded px-2.5 py-1.5 mt-3">
+                    Nhân viên đang tiếp quản — bot không tự động gửi tin trong hội thoại này.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-neutral-950">
+                {(chiTiet.messages || []).length === 0 ? (
+                  <p className="text-sm text-gray-500 text-center">Hội thoại chưa có tin nhắn nào.</p>
+                ) : (
+                  chiTiet.messages.map((m: any) => {
+                    const benKhach = m.sender_type === "khach";
+                    const heThong = m.sender_type === "he_thong";
+                    if (heThong) {
+                      return (
+                        <div key={m.id} className="text-center">
+                          <span className="text-xs bg-gray-200 dark:bg-neutral-800 text-gray-600 dark:text-gray-300 px-2.5 py-1 rounded-full">
+                            {m.content} · {dinhDangThoiGian(m.created_at)}
+                          </span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={m.id} className={`flex ${benKhach ? "justify-start" : "justify-end"}`}>
+                        <div className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-sm ${
+                          benKhach
+                            ? "bg-white dark:bg-neutral-800 rounded-bl-sm"
+                            : m.sender_type === "bot"
+                              ? "bg-blue-100 dark:bg-blue-950 rounded-br-sm"
+                              : "bg-green-100 dark:bg-green-950 rounded-br-sm"}`}>
+                          <p className="text-[11px] font-medium text-gray-500 mb-0.5">
+                            {NHAN_NGUOI_GUI[m.sender_type] || m.sender_type}
+                            {m.sender_type === "bot" && " 🤖"}
+                          </p>
+                          <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
+                          <p className="text-[11px] text-gray-400 mt-1 text-right">
+                            {dinhDangThoiGian(m.created_at)}
+                            {m.status && m.status !== "da_gui" ? ` · ${m.status}` : ""}
+                          </p>
+                          {m.error && <p className="text-[11px] text-red-600 mt-0.5">Lỗi gửi: {m.error}</p>}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={cuoiChatRef} />
+              </div>
+
+              <div className="p-3 border-t flex gap-2">
+                <textarea className={`${oNhap} resize-none`} rows={2}
+                  placeholder="Nhập tin nhắn gửi với tư cách nhân viên... (Enter để gửi, Shift+Enter xuống dòng)"
+                  value={noiDungGui}
+                  onChange={(e) => setNoiDungGui(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); guiTin(); } }} />
+                <Nut onClick={guiTin} disabled={dangGui || !noiDungGui.trim()}>
+                  {dangGui ? "Đang gửi..." : "Gửi tin"}
+                </Nut>
+              </div>
+            </>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}

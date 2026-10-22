@@ -1,0 +1,11 @@
+{
+  "name": "zalo-personal-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dịch vụ phụ (sidecar) kết nối Zalo cá nhân bằng thư viện không chính thức zca-js - chỉ chạy local, không commit session/credentials",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": { "start": "node src/index.js" },
+  "dependencies": { "zca-js": "^2.0.0" },
+  "engines": { "node": ">=18" }
+}
