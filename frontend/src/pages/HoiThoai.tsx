@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, dinhDangThoiGian } from "../lib/api";
-import { ChuaCoDuLieu, DangTai, HuyHieuTrangThai, LoiTai, Nut, ThongBao, TieuDeTrang, oNhap } from "../components/dungChung";
+import { ChuaCoDuLieu, DangTai, HuyHieuTrangThai, LoiTai, Nut, PhanTrang, ThongBao, TieuDeTrang, oNhap } from "../components/dungChung";
 import { useToast } from "../components/Toast";
 
 // Hộp thư hội thoại 2 cột:
@@ -23,6 +23,11 @@ export default function HoiThoai() {
   const [tuKhoa, setTuKhoa] = useState("");
   const [locTrangThai, setLocTrangThai] = useState("");
   const [locTin, setLocTin] = useState("");
+  // Phân trang phía máy chủ (Đợt 3 mục 1): bộ lọc được giữ nguyên khi chuyển trang
+  const [trang, setTrang] = useState(1);
+  const [kichThuocTrang, setKichThuocTrang] = useState(20);
+  const [tongMuc, setTongMuc] = useState(0);
+  const [tongTrang, setTongTrang] = useState(1);
   const [dangChonId, setDangChonId] = useState<number | null>(null);
   const [chiTiet, setChiTiet] = useState<any>(null);
   const [dangTaiChiTiet, setDangTaiChiTiet] = useState(false);
@@ -39,8 +44,13 @@ export default function HoiThoai() {
       if (locTrangThai) thamSo.set("trang_thai", locTrangThai);
       if (locTin) thamSo.set("loc_tin", locTin);
       if (tuKhoa.trim()) thamSo.set("tu_khoa", tuKhoa.trim());
-      const ds = await api(`/api/hoi-thoai?${thamSo.toString()}`);
+      thamSo.set("trang", String(trang));
+      thamSo.set("kich_thuoc_trang", String(kichThuocTrang));
+      const kq = await api(`/api/hoi-thoai?${thamSo.toString()}`);
+      const ds = Array.isArray(kq) ? kq : kq.muc || [];
       setDanhSach(ds);
+      setTongMuc(Array.isArray(kq) ? kq.length : kq.tong || 0);
+      setTongTrang(Array.isArray(kq) ? 1 : kq.tong_trang || 1);
       if (dangChonId === null && ds.length > 0) setDangChonId(ds[0].id);
     } catch (e: any) {
       setLoi(e.message);
@@ -48,7 +58,7 @@ export default function HoiThoai() {
       setDangTai(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locTrangThai, locTin, tuKhoa]);
+  }, [locTrangThai, locTin, tuKhoa, trang, kichThuocTrang]);
 
   useEffect(() => {
     const t = setTimeout(taiDanhSach, tuKhoa ? 350 : 0);
@@ -115,7 +125,7 @@ export default function HoiThoai() {
         <section className="bg-white dark:bg-neutral-900 rounded shadow">
           <div className="p-3 border-b space-y-2">
             <input className={oNhap} placeholder="Tìm theo tên khách hoặc nội dung tin nhắn..."
-              value={tuKhoa} onChange={(e) => setTuKhoa(e.target.value)} />
+              value={tuKhoa} onChange={(e) => { setTuKhoa(e.target.value); setTrang(1); }} />
             {/* Lọc theo tình trạng nhắn tin (mục 9.2) */}
             <div className="flex rounded-lg border overflow-hidden text-sm" role="tablist" aria-label="Lọc theo tình trạng nhắn tin">
               {[
@@ -124,14 +134,14 @@ export default function HoiThoai() {
                 ["chua_nhan_tin", "Chưa nhắn"],
               ].map(([v, nhan]) => (
                 <button key={v} role="tab" aria-selected={locTin === v}
-                  onClick={() => setLocTin(v)}
+                  onClick={() => { setLocTin(v); setTrang(1); }}
                   className={`flex-1 px-2 py-2 transition-colors duration-160 ${
                     locTin === v ? "bg-thuongHieu-600 text-white font-medium" : "bg-white dark:bg-neutral-900 hover:bg-gray-50 dark:hover:bg-neutral-800"}`}>
                   {nhan}
                 </button>
               ))}
             </div>
-            <select className={oNhap} value={locTrangThai} onChange={(e) => setLocTrangThai(e.target.value)}>
+            <select className={oNhap} value={locTrangThai} onChange={(e) => { setLocTrangThai(e.target.value); setTrang(1); }}>
               <option value="">Tất cả trạng thái</option>
               <option value="dang_xu_ly">Đang xử lý</option>
               <option value="cho_phan_hoi">Chờ phản hồi</option>
@@ -173,6 +183,13 @@ export default function HoiThoai() {
               ))
             )}
           </div>
+          {!dangTai && !loi && (
+            <div className="px-3 pb-3">
+              <PhanTrang trang={trang} tongTrang={tongTrang} tong={tongMuc} kichThuoc={kichThuocTrang}
+                onDoiTrang={setTrang}
+                onDoiKichThuoc={(k) => { setKichThuocTrang(k); setTrang(1); }} />
+            </div>
+          )}
         </section>
 
         {/* Cột phải — khung chat */}
@@ -245,8 +262,19 @@ export default function HoiThoai() {
                         </div>
                       );
                     }
+                    // Bong bóng kiểu app nhắn tin (design pass đợt 3): avatar nhỏ
+                    // theo người gửi + ký hiệu trạng thái gửi ở góc bong bóng.
+                    const avatar =
+                      m.sender_type === "bot"
+                        ? "bg-blue-600 text-white fa-solid fa-robot"
+                        : m.sender_type === "nhan_vien"
+                          ? "bg-green-600 text-white fa-solid fa-headset"
+                          : "bg-gray-300 dark:bg-neutral-700 text-gray-600 dark:text-gray-200 fa-solid fa-user";
                     return (
-                      <div key={m.id} className={`flex ${benKhach ? "justify-start" : "justify-end"}`}>
+                      <div key={m.id} className={`flex items-end gap-2 ${benKhach ? "justify-start" : "justify-end"}`}>
+                        {benKhach && (
+                          <span className={`${avatar} w-7 h-7 rounded-full flex-none flex items-center justify-center text-[11px]`} />
+                        )}
                         <div className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-sm ${
                           benKhach
                             ? "bg-white dark:bg-neutral-800 rounded-bl-sm"
@@ -254,16 +282,24 @@ export default function HoiThoai() {
                               ? "bg-blue-100 dark:bg-blue-950 rounded-br-sm"
                               : "bg-green-100 dark:bg-green-950 rounded-br-sm"}`}>
                           <p className="text-[11px] font-medium text-gray-500 mb-0.5">
-                            {m.sender_type === "bot" && <i className="fa-solid fa-robot mr-1" />}
                             {NHAN_NGUOI_GUI[m.sender_type] || m.sender_type}
                           </p>
                           <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
                           <p className="text-[11px] text-gray-400 mt-1 text-right">
                             {dinhDangThoiGian(m.created_at)}
-                            {m.status && m.status !== "da_gui" ? ` · ${m.status}` : ""}
+                            {!benKhach && m.status === "da_gui" && (
+                              <span className="text-blue-500 ml-1" title="Đã gửi"><i className="fa-solid fa-check-double" /></span>
+                            )}
+                            {!benKhach && m.status === "loi_gui" && (
+                              <span className="text-red-500 ml-1" title="Gửi lỗi"><i className="fa-solid fa-triangle-exclamation" /> Gửi lỗi</span>
+                            )}
+                            {m.status && m.status !== "da_gui" && m.status !== "loi_gui" ? ` · ${m.status}` : ""}
                           </p>
                           {m.error && <p className="text-[11px] text-red-600 mt-0.5">Lỗi gửi: {m.error}</p>}
                         </div>
+                        {!benKhach && (
+                          <span className={`${avatar} w-7 h-7 rounded-full flex-none flex items-center justify-center text-[11px]`} />
+                        )}
                       </div>
                     );
                   })

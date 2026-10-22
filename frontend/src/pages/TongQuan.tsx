@@ -50,11 +50,15 @@ export default function TongQuan({ diToi }: { diToi?: (tenTrang: string) => void
   if (dangTai && !tongQuan) return <DangTai />;
   if (loi && !tongQuan) return <LoiTai loi={loi} onThuLai={tai} />;
 
-  const the = (nhan: string, giaTri: any, ghiChu?: string) => (
-    <div className="bg-white dark:bg-neutral-900 p-4 rounded shadow">
-      <div className="text-sm text-gray-500">{nhan}</div>
-      <div className="text-2xl font-bold mt-1">{giaTri}</div>
-      {ghiChu && <div className="text-xs text-gray-400 mt-1">{ghiChu}</div>}
+  // Thẻ thống kê có icon Font Awesome trong ô bo góc màu (design pass đợt 3)
+  const the = (nhan: string, giaTri: any, ghiChu: string | undefined, icon: string, mauIcon: string) => (
+    <div className="bg-white dark:bg-neutral-900 p-4 rounded-xl shadow-the flex items-start gap-3">
+      <span className={`the-thong-ke-icon ${mauIcon}`}><i className={icon} /></span>
+      <div className="min-w-0">
+        <div className="text-sm text-gray-500">{nhan}</div>
+        <div className="text-2xl font-bold mt-0.5">{giaTri}</div>
+        {ghiChu && <div className="text-xs text-gray-400 mt-1">{ghiChu}</div>}
+      </div>
     </div>
   );
 
@@ -68,18 +72,61 @@ export default function TongQuan({ diToi }: { diToi?: (tenTrang: string) => void
       {loi && <p className="text-sm text-red-600 mb-3">Lỗi làm mới: {loi}</p>}
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-        {the("Tổng khách hàng", dinhDangSo(tongQuan?.tong_khach_hang))}
+        {the("Tổng khách hàng", dinhDangSo(tongQuan?.tong_khach_hang), undefined, "fa-solid fa-users", "bg-blue-100 text-blue-600 dark:bg-blue-950")}
         {the("Tổng hội thoại", dinhDangSo(tongQuan?.tong_hoi_thoai),
-          `${dinhDangSo(tongQuan?.hoi_thoai_dang_xu_ly)} đang xử lý`)}
-        {the("Hội thoại nhân viên tiếp quản", dinhDangSo(tongQuan?.hoi_thoai_chuyen_nhan_vien))}
+          `${dinhDangSo(tongQuan?.hoi_thoai_dang_xu_ly)} đang xử lý`, "fa-solid fa-comments", "bg-violet-100 text-violet-600 dark:bg-violet-950")}
+        {the("Hội thoại nhân viên tiếp quản", dinhDangSo(tongQuan?.hoi_thoai_chuyen_nhan_vien), undefined, "fa-solid fa-headset", "bg-purple-100 text-purple-600 dark:bg-purple-950")}
         {the("Tổng tin nhắn", dinhDangSo(tongQuan?.tong_tin_nhan),
-          phanTich ? `Bot: ${dinhDangSo(phanTich.tin_nhan_bot)} · Khách: ${dinhDangSo(phanTich.tin_nhan_khach)}` : undefined)}
-        {the("Tài liệu tri thức", dinhDangSo(tongQuan?.tong_tai_lieu))}
-        {the("Ký ức đã lưu (Bộ nhớ AI)", dinhDangSo(tongQuan?.tong_bo_nho))}
-        {the("Dịch vụ đang quản lý", dinhDangSo(tongQuan?.tong_dich_vu))}
+          phanTich ? `Bot: ${dinhDangSo(phanTich.tin_nhan_bot)} · Khách: ${dinhDangSo(phanTich.tin_nhan_khach)}` : undefined, "fa-solid fa-message", "bg-sky-100 text-sky-600 dark:bg-sky-950")}
+        {the("Tài liệu tri thức", dinhDangSo(tongQuan?.tong_tai_lieu), undefined, "fa-solid fa-book-open", "bg-amber-100 text-amber-600 dark:bg-amber-950")}
+        {the("Ký ức đã lưu (Bộ nhớ AI)", dinhDangSo(tongQuan?.tong_bo_nho), undefined, "fa-solid fa-brain", "bg-pink-100 text-pink-600 dark:bg-pink-950")}
+        {the("Dịch vụ đang quản lý", dinhDangSo(tongQuan?.tong_dich_vu), undefined, "fa-solid fa-tags", "bg-green-100 text-green-600 dark:bg-green-950")}
         {the("Lượt gọi AI", dinhDangSo(tongQuan?.tong_luot_goi_ai),
-          `${dinhDangSo(tongQuan?.loi_goi_ai)} lượt lỗi · Chi phí ước tính: ${dinhDangSo(Math.round(tongQuan?.chi_phi_ai_uoc_tinh || 0))}`)}
+          `${dinhDangSo(tongQuan?.loi_goi_ai)} lượt lỗi · Chi phí ước tính: ${dinhDangSo(Math.round(tongQuan?.chi_phi_ai_uoc_tinh || 0))}`, "fa-solid fa-robot", "bg-indigo-100 text-indigo-600 dark:bg-indigo-950")}
       </div>
+
+      {/* Mini bar chart hoạt động 7 ngày (design pass đợt 3) — dữ liệu thật từ /api/tong-quan */}
+      {Array.isArray(tongQuan?.hoat_dong_7_ngay) && (
+        <section className="bg-white dark:bg-neutral-900 p-5 rounded-xl shadow-the mt-6">
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <h2 className="font-bold flex items-center gap-2">
+              <i className="fa-solid fa-chart-column text-thuongHieu-600" /> Hoạt động 7 ngày gần nhất
+            </h2>
+            <span className="flex-1" />
+            <span className="text-xs text-gray-500 flex items-center gap-3">
+              <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-sky-400 mr-1" />Khách</span>
+              <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-blue-600 mr-1" />Bot</span>
+              <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-500 mr-1" />Nhân viên</span>
+            </span>
+          </div>
+          {(() => {
+            const dsNgay = tongQuan.hoat_dong_7_ngay as any[];
+            const lonNhat = Math.max(1, ...dsNgay.map((d) => d.tong || 0));
+            const TEN_THU = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+            return (
+              <div className="flex items-end gap-2 sm:gap-4 h-36">
+                {dsNgay.map((d) => {
+                  const thu = TEN_THU[new Date(`${d.ngay}T00:00:00`).getDay()];
+                  const phanTram = (v: number) => `${Math.round(((v || 0) / lonNhat) * 100)}%`;
+                  return (
+                    <div key={d.ngay} className="flex-1 flex flex-col items-center gap-1.5 min-w-0"
+                      title={`${d.ngay}: ${d.tong} tin (Khách ${d.tin_khach} · Bot ${d.tin_bot} · Nhân viên ${d.tin_nhan_vien})`}>
+                      <span className="text-xs font-semibold">{d.tong || ""}</span>
+                      <div className="w-full max-w-12 h-24 flex flex-col-reverse rounded-t-md overflow-hidden bg-gray-100 dark:bg-neutral-800">
+                        <div className="bg-sky-400 w-full" style={{ height: phanTram(d.tin_khach) }} />
+                        <div className="bg-blue-600 w-full" style={{ height: phanTram(d.tin_bot) }} />
+                        <div className="bg-green-500 w-full" style={{ height: phanTram(d.tin_nhan_vien) }} />
+                      </div>
+                      <span className="text-xs text-gray-500">{thu}</span>
+                      <span className="text-[10px] text-gray-400 -mt-1">{String(d.ngay).slice(5).split("-").reverse().join("/")}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </section>
+      )}
 
       <section className={`mt-6 p-5 rounded shadow border-2 ${tuDo ? "bg-amber-50 border-amber-300 dark:bg-neutral-900" : "bg-white dark:bg-neutral-900 border-transparent"}`}>
         <div className="flex flex-wrap items-center gap-3">

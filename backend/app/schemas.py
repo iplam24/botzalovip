@@ -15,6 +15,10 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None; is_active: Optional[bool] = None
     # Đặt mật khẩu mới khi sửa người dùng (để trống/không gửi = giữ nguyên mật khẩu cũ)
     password: Optional[str] = None
+class DoiMatKhauIn(BaseModel):
+    # Đổi mật khẩu tự phục vụ: bắt buộc biết mật khẩu hiện tại (kiểm tra hash ở backend)
+    mat_khau_cu: str
+    mat_khau_moi: str
 class BatTatIn(BaseModel): is_active: bool
 class PhanBoIn(BaseModel): admin_user_id: Optional[int] = None; ghi_chu: Optional[str] = None
 class PhanBoHangLoatIn(BaseModel): ids: List[int]; admin_user_id: Optional[int] = None

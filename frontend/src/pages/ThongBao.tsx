@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, dinhDangThoiGian } from "../lib/api";
 import {
-  ChuaCoDuLieu, DangTai, LoiTai, Nut, ThongBao as HopThongBao, TieuDeTrang, oNhap,
+  ChuaCoDuLieu, DangTai, LoiTai, Nut, PhanTrang, ThongBao as HopThongBao, TieuDeTrang, oNhap,
 } from "../components/dungChung";
 
 // Trung tâm thông báo admin (GĐ mở rộng 1): sự kiện từ bảng thong_bao —
@@ -35,6 +35,11 @@ export default function ThongBao() {
   const [loai, setLoai] = useState("");
   const [soChuaDoc, setSoChuaDoc] = useState(0);
   const [thongBao, setThongBao] = useState<{ loai: "thanh_cong" | "loi"; text: string } | null>(null);
+  // Phân trang phía máy chủ (Đợt 3 mục 1)
+  const [trang, setTrang] = useState(1);
+  const [kichThuocTrang, setKichThuocTrang] = useState(20);
+  const [tongMuc, setTongMuc] = useState(0);
+  const [tongTrang, setTongTrang] = useState(1);
 
   const tai = useCallback(async () => {
     setDangTai(true);
@@ -43,19 +48,22 @@ export default function ThongBao() {
       const thamSo = new URLSearchParams();
       if (chiChuaDoc) thamSo.set("chua_doc", "true");
       if (loai) thamSo.set("loai", loai);
-      const chuoi = thamSo.toString() ? `?${thamSo.toString()}` : "";
+      thamSo.set("trang", String(trang));
+      thamSo.set("kich_thuoc_trang", String(kichThuocTrang));
       const [danhSach, dem] = await Promise.all([
-        api(`/api/thong-bao${chuoi}`),
+        api(`/api/thong-bao?${thamSo.toString()}`),
         api("/api/thong-bao/dem-chua-doc"),
       ]);
-      setDs(danhSach);
+      setDs(Array.isArray(danhSach) ? danhSach : danhSach.muc || []);
+      setTongMuc(Array.isArray(danhSach) ? danhSach.length : danhSach.tong || 0);
+      setTongTrang(Array.isArray(danhSach) ? 1 : danhSach.tong_trang || 1);
       setSoChuaDoc(dem.chua_doc || 0);
     } catch (e: any) {
       setLoi(e.message);
     } finally {
       setDangTai(false);
     }
-  }, [chiChuaDoc, loai]);
+  }, [chiChuaDoc, loai, trang, kichThuocTrang]);
 
   useEffect(() => { tai(); }, [tai]);
 
@@ -91,14 +99,14 @@ export default function ThongBao() {
 
       <div className="bg-white dark:bg-neutral-900 rounded shadow">
         <div className="p-3 border-b flex flex-wrap gap-2 items-center">
-          <select className={`${oNhap} max-w-xs`} value={loai} onChange={(e) => setLoai(e.target.value)}>
+          <select className={`${oNhap} max-w-xs`} value={loai} onChange={(e) => { setLoai(e.target.value); setTrang(1); }}>
             <option value="">Tất cả loại thông báo</option>
             {Object.entries(NHAN_LOAI_THONG_BAO).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
             ))}
           </select>
           <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input type="checkbox" checked={chiChuaDoc} onChange={(e) => setChiChuaDoc(e.target.checked)} />
+            <input type="checkbox" checked={chiChuaDoc} onChange={(e) => { setChiChuaDoc(e.target.checked); setTrang(1); }} />
             Chỉ hiện chưa đọc
           </label>
         </div>
@@ -137,6 +145,13 @@ export default function ThongBao() {
               </li>
             ))}
           </ul>
+        )}
+        {!dangTai && !loi && ds.length > 0 && (
+          <div className="px-3 pb-3">
+            <PhanTrang trang={trang} tongTrang={tongTrang} tong={tongMuc} kichThuoc={kichThuocTrang}
+              onDoiTrang={setTrang}
+              onDoiKichThuoc={(k) => { setKichThuocTrang(k); setTrang(1); }} />
+          </div>
         )}
       </div>
     </div>

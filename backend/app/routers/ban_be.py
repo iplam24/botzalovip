@@ -15,6 +15,7 @@ from ..models import PhanBoBanBe, User
 from ..schemas import PhanBoIn, PhanBoHangLoatIn
 from ..deps import get_current_user, require_admin
 from ..services.zalo_connector import ZaloPersonalConnector
+from ..services.phan_trang import co_phan_trang, trang_hoa
 
 router = APIRouter(prefix="/api/ban-be-zalo", tags=["Bạn bè Zalo"])
 
@@ -32,7 +33,7 @@ def out(b: PhanBoBanBe):
 
 
 @router.get("")
-def danh_sach(tu_khoa: str = "", admin_id: str = "", db: Session = Depends(get_db), u: User = Depends(get_current_user)):
+def danh_sach(tu_khoa: str = "", admin_id: str = "", trang: int = 0, kich_thuoc_trang: int = 20, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     """admin_id: '' = tất cả | 'chua_phan_bo' = chưa có admin | '<id>' = của admin đó."""
     q = db.query(PhanBoBanBe)
     if admin_id == "chua_phan_bo":
@@ -46,7 +47,10 @@ def danh_sach(tu_khoa: str = "", admin_id: str = "", db: Session = Depends(get_d
     if tu_khoa:
         tk = tu_khoa.lower()
         ds = [b for b in ds if tk in (b.ten_hien_thi or "").lower() or tk in (b.zalo_friend_id or "").lower()]
-    return [out(b) for b in ds]
+    ket_qua = [out(b) for b in ds]
+    if co_phan_trang(trang):
+        return trang_hoa(ket_qua, trang, kich_thuoc_trang)
+    return ket_qua
 
 
 @router.get("/thong-ke")

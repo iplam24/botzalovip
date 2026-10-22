@@ -10,13 +10,31 @@ from sqlalchemy.orm import Session
 from ..models import MemoryItem, Message, SystemLog, CollectedInfo, Conversation
 from .text_utils import normalize_vi
 
+def _nhung_cho_muc(db: Session, item):
+    """Nhúng vector cho một ký ức (nếu nguồn sẵn sàng); lỗi thì bỏ qua êm."""
+    try:
+        from . import embedding_service
+        vec = embedding_service.nhung_mot(db, item.content)
+        if vec:
+            item.embedding = embedding_service.ghi_vector(vec)
+            db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 def remember(db: Session, customer_id, content, memory_type="ngu_nghia", source="he_thong", confidence=0.8):
     # Chống trùng: cùng khách + cùng nội dung chuẩn hóa
     existing = db.query(MemoryItem).filter(MemoryItem.customer_id == customer_id).all()
     for m in existing:
         if normalize_vi(m.content) == normalize_vi(content): return m, False
     item = MemoryItem(customer_id=customer_id, content=content, memory_type=memory_type, source=source, confidence=confidence)
-    db.add(item); db.commit(); db.refresh(item); return item, True
+    db.add(item); db.commit(); db.refresh(item)
+    # Đợt 3 mục 3: nhúng vector ngay khi tạo ký ức (nguồn chưa sẵn sàng -> bỏ qua)
+    _nhung_cho_muc(db, item)
+    return item, True
 
 def retrieve_memories(db: Session, customer_id, query="", limit=5):
     q = db.query(MemoryItem)
@@ -24,7 +42,50 @@ def retrieve_memories(db: Session, customer_id, query="", limit=5):
     items = q.order_by(MemoryItem.pinned.desc(), MemoryItem.created_at.desc()).all()
     if query:
         nq = normalize_vi(query); items = sorted(items, key=lambda m: -sum(1 for w in nq.split() if w in normalize_vi(m.content)))
-    return items[:limit]
+    ket_qua = items[:limit]
+    # Đợt 3 mục 3: bổ sung ký ức khớp NGỮ NGHĨA (cosine) ngoài danh sách từ khóa
+    if query:
+        try:
+            from ..routers.cai_dat import doc_cai_dat
+            from . import embedding_service
+            if doc_cai_dat(db).get("tim_kiem_ngu_nghia", True):
+                qv = embedding_service.nhung_mot(db, query)
+                if qv:
+                    da_co = {id(m) for m in ket_qua}
+                    ung_vien = []
+                    for m in items:
+                        if id(m) in da_co:
+                            continue
+                        vec = embedding_service.doc_vector(m.embedding)
+                        if vec and embedding_service.cosine(qv, vec) >= 0.3:
+                            ung_vien.append((embedding_service.cosine(qv, vec), m))
+                    ung_vien.sort(key=lambda x: -x[0])
+                    ket_qua = ket_qua + [m for _, m in ung_vien]
+        except Exception:
+            pass
+    return ket_qua
+
+
+def trang_thai_vector(db: Session) -> dict:
+    """Trạng thái nhúng của bộ nhớ AI: nguồn + đã nhúng/tổng số ký ức."""
+    from . import embedding_service
+    gia_tri = [h[0] for h in db.query(MemoryItem.embedding).all()]
+    da = sum(1 for v in gia_tri if v)
+    tt = embedding_service.nguon_hien_tai(db)
+    return {"tong_muc": len(gia_tri), "da_nhung": da, "chua_nhung": len(gia_tri) - da,
+            "nguon": tt["nguon"], "san_sang": tt["san_sang"], "mo_ta": tt["mo_ta"]}
+
+
+def nhung_lai_tat_ca(db: Session) -> dict:
+    """Nhúng (lại) vector cho mọi ký ức; nguồn chưa sẵn sàng -> không ghi gì."""
+    from . import embedding_service
+    items = db.query(MemoryItem).all()
+    vectors = embedding_service.nhung_nhieu(db, [m.content for m in items]) if items else []
+    if vectors:
+        for m, vec in zip(items, vectors):
+            m.embedding = embedding_service.ghi_vector(vec)
+        db.commit()
+    return trang_thai_vector(db)
 
 
 # ---- Hồ sơ tóm tắt dài hạn theo khách ----

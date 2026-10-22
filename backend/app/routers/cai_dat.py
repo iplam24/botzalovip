@@ -172,6 +172,11 @@ DANG_KY_CAI_DAT = [
        "Tắt = không tạo thông báo admin cho mọi sự kiện.", "bool", True),
     _k("module_gui_thong_bao_zalo_admin", "he_thong", "Gửi thông báo qua Zalo cho admin",
        "Tắt = thông báo chỉ nằm trong Trung tâm thông báo, không gửi qua Zalo.", "bool", True),
+    # ---- Đợt nâng cấp 3, mục 3: Vector DB / tìm kiếm ngữ nghĩa ----
+    _k("tim_kiem_ngu_nghia", "he_thong", "Tìm kiếm ngữ nghĩa (Vector DB)",
+       "Bật: truy xuất kho tri thức và bộ nhớ hợp nhất điểm ngữ nghĩa (cosine trên vector nhúng) với điểm từ khóa. Muốn có kết quả ngữ nghĩa phải có vector đã nhúng (Kho tri thức → nút Nhúng lại toàn bộ) và nguồn embedding sẵn sàng. Tắt hoặc chưa có vector: hệ thống tự dùng tìm từ khóa như cũ.", "bool", True),
+    _k("so_ket_qua_ngu_nghia", "he_thong", "Số kết quả ngữ nghĩa tối đa",
+       "Số đoạn tri thức/ký ức lấy theo độ tương đồng ngữ nghĩa trong mỗi lần truy hồi (hợp nhất với kết quả từ khóa).", "so", 4, min=1, max=20),
 ]
 
 MAC_DINH = {d["khoa"]: d["mac_dinh"] for d in DANG_KY_CAI_DAT}
@@ -256,17 +261,35 @@ def lay_dang_ky(db: Session = Depends(get_db), u: User = Depends(get_current_use
     }
 
 
+def _luu_mot_cai_dat(db: Session, khoa: str, gia_tri):
+    dong = db.get(SystemSetting, khoa)
+    if dong:
+        dong.value = json.dumps(gia_tri, ensure_ascii=False)
+    else:
+        db.add(SystemSetting(key=khoa, value=json.dumps(gia_tri, ensure_ascii=False)))
+
+
+def ap_dung_thay_doi(db: Session, thay_doi: dict) -> dict:
+    """Áp dụng một tập thay đổi {khoa: gia_tri} với kiểm tra đầy đủ theo
+    registry (khóa lạ -> 400, sai kiểu/ràng buộc -> 400). Dùng chung cho
+    PUT /api/cai-dat và Trợ lý cấu hình qua chat (Đợt 3, mục 2) để mọi đường
+    thay đổi cài đặt đều qua cùng một cổng kiểm tra."""
+    for khoa, gia_tri in thay_doi.items():
+        if khoa not in _THEO_KHOA:
+            raise HTTPException(400, f"Khóa cài đặt không tồn tại: {khoa}")
+        gia_tri = _kiem_tra_gia_tri(_THEO_KHOA[khoa], gia_tri)
+        _luu_mot_cai_dat(db, khoa, gia_tri)
+    db.commit()
+    return doc_cai_dat(db)
+
+
 @router.put("")
 def cap_nhat_cai_dat(data: CaiDatIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     for khoa, gia_tri in data.model_dump(exclude_unset=True).items():
         if gia_tri is None or khoa not in _THEO_KHOA:
             continue
         gia_tri = _kiem_tra_gia_tri(_THEO_KHOA[khoa], gia_tri)
-        dong = db.get(SystemSetting, khoa)
-        if dong:
-            dong.value = json.dumps(gia_tri, ensure_ascii=False)
-        else:
-            db.add(SystemSetting(key=khoa, value=json.dumps(gia_tri, ensure_ascii=False)))
+        _luu_mot_cai_dat(db, khoa, gia_tri)
     db.commit()
     return doc_cai_dat(db)
 

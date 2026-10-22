@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api, dinhDangThoiGian } from "../lib/api";
 import {
-  ChuaCoDuLieu, DangTai, HopBieuMau, HopXacNhan, LoiTai, Nut, ThongBao, TieuDeTrang, Truong, oNhap,
+  ChuaCoDuLieu, DangTai, HopBieuMau, HopXacNhan, LoiTai, Nut, PhanTrang, ThongBao, TieuDeTrang, Truong, oNhap,
 } from "../components/dungChung";
 
 // Bộ nhớ AI dài hạn: lọc theo loại ký ức và khách hàng, thêm/sửa, ghim, đánh dấu đã xác minh, xóa.
@@ -32,6 +32,12 @@ export default function BoNhoAI() {
   const [xoaId, setXoaId] = useState<number | null>(null);
   const [dangXoa, setDangXoa] = useState(false);
   const [thongBao, setThongBao] = useState<{ loai: "thanh_cong" | "loi"; text: string } | null>(null);
+  // Phân trang phía máy chủ (Đợt 3 mục 1) + trạng thái Vector DB của bộ nhớ (mục 3)
+  const [trang, setTrang] = useState(1);
+  const [kichThuocTrang, setKichThuocTrang] = useState(20);
+  const [tongMuc, setTongMuc] = useState(0);
+  const [tongTrang, setTongTrang] = useState(1);
+  const [trangThaiVector, setTrangThaiVector] = useState<any>(null);
 
   const tenKhach = (id: any) => khachHang.find((k) => k.id === id)?.display_name || (id ? `Khách #${id}` : "— (chung)");
 
@@ -43,15 +49,24 @@ export default function BoNhoAI() {
       if (locLoai) thamSo.set("memory_type", locLoai);
       if (locKhach) thamSo.set("customer_id", locKhach);
       if (tuKhoa.trim()) thamSo.set("tu_khoa", tuKhoa.trim());
-      const [boNho, kh] = await Promise.all([api(`/api/bo-nho?${thamSo.toString()}`), api("/api/khach-hang")]);
-      setDs(boNho);
+      thamSo.set("trang", String(trang));
+      thamSo.set("kich_thuoc_trang", String(kichThuocTrang));
+      const [boNho, kh, ttVector] = await Promise.all([
+        api(`/api/bo-nho?${thamSo.toString()}`),
+        api("/api/khach-hang"),
+        api("/api/bo-nho/trang-thai-vector").catch(() => null),
+      ]);
+      setDs(Array.isArray(boNho) ? boNho : boNho.muc || []);
+      setTongMuc(Array.isArray(boNho) ? boNho.length : boNho.tong || 0);
+      setTongTrang(Array.isArray(boNho) ? 1 : boNho.tong_trang || 1);
       setKhachHang(kh);
+      if (ttVector) setTrangThaiVector(ttVector);
     } catch (e: any) {
       setLoi(e.message);
     } finally {
       setDangTai(false);
     }
-  }, [locLoai, locKhach, tuKhoa]);
+  }, [locLoai, locKhach, tuKhoa, trang, kichThuocTrang]);
 
   useEffect(() => {
     const t = setTimeout(tai, tuKhoa ? 350 : 0);
@@ -137,24 +152,30 @@ export default function BoNhoAI() {
         <Nut onClick={moThem}><i className="fa-solid fa-plus mr-2" />Thêm ký ức</Nut>
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
+      {trangThaiVector && (
+        <p className="text-sm text-gray-500 mb-3">
+          <i className="fa-solid fa-vector-square mr-1.5 text-thuongHieu-600" />
+          Tìm kiếm ngữ nghĩa (Vector DB): đã nhúng <b>{trangThaiVector.da_nhung}/{trangThaiVector.tong_muc}</b> ký ức — {trangThaiVector.mo_ta}
+        </p>
+      )}
 
       <div className="bg-white dark:bg-neutral-900 rounded shadow">
         <div className="p-3 border-b grid md:grid-cols-3 gap-2">
-          <select className={oNhap} value={locLoai} onChange={(e) => setLocLoai(e.target.value)}>
+          <select className={oNhap} value={locLoai} onChange={(e) => { setLocLoai(e.target.value); setTrang(1); }}>
             <option value="">Tất cả loại ký ức</option>
             {Object.entries(NHAN_LOAI_KY_UC).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
-          <select className={oNhap} value={locKhach} onChange={(e) => setLocKhach(e.target.value)}>
+          <select className={oNhap} value={locKhach} onChange={(e) => { setLocKhach(e.target.value); setTrang(1); }}>
             <option value="">Tất cả khách hàng</option>
             {khachHang.map((k) => <option key={k.id} value={k.id}>{k.display_name || `Khách #${k.id}`}</option>)}
           </select>
-          <input className={oNhap} placeholder="Tìm trong nội dung ký ức..." value={tuKhoa} onChange={(e) => setTuKhoa(e.target.value)} />
+          <input className={oNhap} placeholder="Tìm trong nội dung ký ức..." value={tuKhoa} onChange={(e) => { setTuKhoa(e.target.value); setTrang(1); }} />
         </div>
         {dangTai ? <DangTai /> : loi ? <LoiTai loi={loi} onThuLai={tai} /> : ds.length === 0 ? (
           <div className="p-4"><ChuaCoDuLieu text="Chưa có ký ức nào khớp bộ lọc. Ký ức được tạo tự động từ hội thoại đủ điều kiện, hoặc thêm tay tại đây." /></div>
         ) : (
           <div className="overflow-auto">
-            <table className="min-w-full text-sm">
+            <table className="min-w-full text-sm bang-du-lieu">
               <thead>
                 <tr className="text-left bg-gray-50 dark:bg-neutral-800">
                   <th className="p-3 border-b">Nội dung ký ức</th>
@@ -195,6 +216,13 @@ export default function BoNhoAI() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {!dangTai && !loi && ds.length > 0 && (
+          <div className="px-3 pb-3">
+            <PhanTrang trang={trang} tongTrang={tongTrang} tong={tongMuc} kichThuoc={kichThuocTrang}
+              onDoiTrang={setTrang}
+              onDoiKichThuoc={(k) => { setKichThuocTrang(k); setTrang(1); }} />
           </div>
         )}
       </div>

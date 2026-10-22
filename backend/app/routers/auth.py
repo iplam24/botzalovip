@@ -11,8 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import User, Customer, PhanBoBanBe
-from ..schemas import LoginIn, UserCreate, UserUpdate
+from ..models import User, Customer, PhanBoBanBe, SystemLog
+from ..schemas import LoginIn, UserCreate, UserUpdate, DoiMatKhauIn
 from ..security import hash_password, verify_password, create_token
 from ..deps import get_current_user, require_admin
 
@@ -53,6 +53,25 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
 @router.get("/me")
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return user_out(db, user)
+
+@router.post("/doi-mat-khau")
+def doi_mat_khau(data: DoiMatKhauIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Đổi mật khẩu TỰ PHỤC VỤ cho chính tài khoản đang đăng nhập.
+
+    - Phải nhập đúng mật khẩu hiện tại (verify bằng hash PBKDF2) — sai -> 400.
+    - Mật khẩu mới tối thiểu 6 ký tự — ngắn hơn -> 400.
+    - Chỉ lưu HASH mới; ghi SystemLog module "auth" (KHÔNG ghi giá trị mật khẩu).
+    - Phiên đăng nhập hiện tại giữ nguyên (JWT cũ vẫn hiệu lực tới khi hết hạn).
+    """
+    if not verify_password(data.mat_khau_cu or "", user.hashed_password or ""):
+        raise HTTPException(400, "Mật khẩu hiện tại không đúng")
+    if len(data.mat_khau_moi or "") < 6:
+        raise HTTPException(400, "Mật khẩu mới phải có tối thiểu 6 ký tự")
+    user.hashed_password = hash_password(data.mat_khau_moi)
+    db.add(SystemLog(level="info", module="auth",
+                     message=f"Người dùng {user.username or user.email} (id={user.id}) đã tự đổi mật khẩu"))
+    db.commit()
+    return {"thong_bao": "Đã đổi mật khẩu thành công"}
 
 @router.post("/nguoi-dung")
 def create_user(data: UserCreate, db: Session = Depends(get_db), admin: User = Depends(require_admin)):

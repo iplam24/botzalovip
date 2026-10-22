@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, dinhDangThoiGian } from "../lib/api";
-import { ChuaCoDuLieu, DangTai, LoiTai, Nut, TieuDeTrang, oNhap } from "../components/dungChung";
+import { ChuaCoDuLieu, DangTai, LoiTai, Nut, PhanTrang, TieuDeTrang, oNhap } from "../components/dungChung";
 import { useToast } from "../components/Toast";
 
 // Bạn bè Zalo + phân bổ admin phụ trách (mục 9.5).
@@ -20,6 +20,11 @@ export default function BanBeZalo() {
   const [locAdmin, setLocAdmin] = useState("");
   const [chon, setChon] = useState<Record<number, boolean>>({});
   const [adminHangLoat, setAdminHangLoat] = useState<string>("");
+  // Phân trang phía máy chủ (Đợt 3 mục 1): lọc được giữ nguyên khi chuyển trang
+  const [trang, setTrang] = useState(1);
+  const [kichThuocTrang, setKichThuocTrang] = useState(20);
+  const [tongMuc, setTongMuc] = useState(0);
+  const [tongTrang, setTongTrang] = useState(1);
 
   const tai = useCallback(async () => {
     setDangTai(true);
@@ -28,18 +33,22 @@ export default function BanBeZalo() {
       const thamSo = new URLSearchParams();
       if (tuKhoa.trim()) thamSo.set("tu_khoa", tuKhoa.trim());
       if (locAdmin) thamSo.set("admin_id", locAdmin);
+      thamSo.set("trang", String(trang));
+      thamSo.set("kich_thuoc_trang", String(kichThuocTrang));
       const [bb, tk] = await Promise.all([
         api(`/api/ban-be-zalo?${thamSo.toString()}`),
         api("/api/ban-be-zalo/thong-ke"),
       ]);
-      setDs(bb);
+      setDs(Array.isArray(bb) ? bb : bb.muc || []);
+      setTongMuc(Array.isArray(bb) ? bb.length : bb.tong || 0);
+      setTongTrang(Array.isArray(bb) ? 1 : bb.tong_trang || 1);
       setThongKe(tk);
     } catch (e: any) {
       setLoi(e.message);
     } finally {
       setDangTai(false);
     }
-  }, [tuKhoa, locAdmin]);
+  }, [tuKhoa, locAdmin, trang, kichThuocTrang]);
 
   useEffect(() => {
     const t = setTimeout(tai, tuKhoa ? 350 : 0);
@@ -153,9 +162,9 @@ export default function BanBeZalo() {
           <div className="relative flex-1">
             <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
             <input className={`${oNhap} pl-9`} placeholder="Tìm bạn bè theo tên hoặc ID Zalo..."
-              value={tuKhoa} onChange={(e) => setTuKhoa(e.target.value)} />
+              value={tuKhoa} onChange={(e) => { setTuKhoa(e.target.value); setTrang(1); }} />
           </div>
-          <select className={`${oNhap} md:w-60`} value={locAdmin} onChange={(e) => setLocAdmin(e.target.value)}>
+          <select className={`${oNhap} md:w-60`} value={locAdmin} onChange={(e) => { setLocAdmin(e.target.value); setTrang(1); }}>
             <option value="">Tất cả (đã + chưa phân bổ)</option>
             <option value="chua_phan_bo">Chưa phân bổ</option>
             {nguoiDung.map((u) => (
@@ -185,7 +194,7 @@ export default function BanBeZalo() {
           </div>
         ) : (
           <div className="overflow-x-auto cuon-dep">
-            <table className="min-w-[760px] w-full text-sm">
+            <table className="min-w-[760px] w-full text-sm bang-du-lieu">
               <thead>
                 <tr className="text-left bg-gray-50 dark:bg-neutral-800">
                   <th className="p-3 border-b w-10">
@@ -241,6 +250,13 @@ export default function BanBeZalo() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {!dangTai && !loi && ds.length > 0 && (
+          <div className="px-3 pb-3">
+            <PhanTrang trang={trang} tongTrang={tongTrang} tong={tongMuc} kichThuoc={kichThuocTrang}
+              onDoiTrang={setTrang}
+              onDoiKichThuoc={(k) => { setKichThuocTrang(k); setTrang(1); }} />
           </div>
         )}
       </div>

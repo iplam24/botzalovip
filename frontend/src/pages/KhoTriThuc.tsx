@@ -1,8 +1,9 @@
 import { FormEvent, Fragment, useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import {
-  ChuaCoDuLieu, DangTai, HopBieuMau, HopXacNhan, LoiTai, Nut, ThongBao, TieuDeTrang, Truong, oNhap,
+  ChuaCoDuLieu, DangTai, HopBieuMau, HopXacNhan, LoiTai, Nut, PhanTrang, ThongBao, TieuDeTrang, Truong, oNhap,
 } from "../components/dungChung";
+import { useToast } from "../components/Toast";
 
 // Kho tri thức: danh sách tài liệu + nhập văn bản trực tiếp + kiểm tra truy xuất
 // (nhập câu hỏi -> hiện đoạn tri thức, tài liệu nguồn và điểm liên quan từ backend).
@@ -20,25 +21,57 @@ export default function KhoTriThuc() {
   const [thongBao, setThongBao] = useState<{ loai: "thanh_cong" | "loi"; text: string } | null>(null);
   const [chiTietId, setChiTietId] = useState<number | null>(null);
 
+  const toast = useToast();
   // Kiểm tra truy xuất
   const [cauHoi, setCauHoi] = useState("");
   const [ketQua, setKetQua] = useState<any[] | null>(null);
   const [dangTruyXuat, setDangTruyXuat] = useState(false);
   const [loiTruyXuat, setLoiTruyXuat] = useState("");
+  // Phân trang phía máy chủ (Đợt 3 mục 1) + trạng thái Vector DB (mục 3)
+  const [trang, setTrang] = useState(1);
+  const [kichThuocTrang, setKichThuocTrang] = useState(20);
+  const [tongMuc, setTongMuc] = useState(0);
+  const [tongTrang, setTongTrang] = useState(1);
+  const [ttVector, setTtVector] = useState<any>(null);
+  const [dangNhung, setDangNhung] = useState(false);
 
   const tai = useCallback(async () => {
     setDangTai(true);
     setLoi("");
     try {
-      const [tl, dv] = await Promise.all([api("/api/tri-thuc/tai-lieu"), api("/api/dich-vu")]);
-      setDs(tl);
+      const [tl, dv, tt] = await Promise.all([
+        api(`/api/tri-thuc/tai-lieu?trang=${trang}&kich_thuoc_trang=${kichThuocTrang}`),
+        api("/api/dich-vu"),
+        api("/api/tri-thuc/trang-thai-vector").catch(() => null),
+      ]);
+      setDs(Array.isArray(tl) ? tl : tl.muc || []);
+      setTongMuc(Array.isArray(tl) ? tl.length : tl.tong || 0);
+      setTongTrang(Array.isArray(tl) ? 1 : tl.tong_trang || 1);
       setDichVu(dv);
+      if (tt) setTtVector(tt);
     } catch (e: any) {
       setLoi(e.message);
     } finally {
       setDangTai(false);
     }
-  }, []);
+  }, [trang, kichThuocTrang]);
+
+  const nhungLai = async () => {
+    setDangNhung(true);
+    try {
+      const tt = await api("/api/tri-thuc/nhung-lai-tat-ca", { method: "POST" });
+      setTtVector(tt);
+      if (tt.san_sang) {
+        toast.thanhCong(`Đã nhúng vector cho ${tt.da_nhung}/${tt.tong_chunk} đoạn tri thức.`);
+      } else {
+        toast.loi("Chưa có nguồn nhúng sẵn sàng — hệ thống vẫn đang tìm theo từ khóa.");
+      }
+    } catch (e: any) {
+      toast.loi(`Nhúng lại thất bại: ${e.message}`);
+    } finally {
+      setDangNhung(false);
+    }
+  };
 
   useEffect(() => { tai(); }, [tai]);
 
@@ -113,9 +146,27 @@ export default function KhoTriThuc() {
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
 
+      {ttVector && (
+        <section className="bg-white dark:bg-neutral-900 rounded shadow p-4 mb-5 flex flex-wrap items-center gap-3">
+          <span className="text-2xl text-thuongHieu-600"><i className="fa-solid fa-vector-square" /></span>
+          <div className="flex-1 min-w-[240px]">
+            <p className="font-semibold text-sm">Tìm kiếm ngữ nghĩa (Vector DB)</p>
+            <p className="text-sm text-gray-500">
+              Đã nhúng <b>{ttVector.da_nhung}/{ttVector.tong_chunk}</b> đoạn tri thức · Nguồn: {ttVector.mo_ta}
+            </p>
+            {!ttVector.san_sang && (
+              <p className="text-xs text-amber-600 mt-0.5">Nguồn nhúng chưa sẵn sàng — truy hồi tạm dùng tìm từ khóa như cũ.</p>
+            )}
+          </div>
+          <Nut mau="xam" onClick={nhungLai} disabled={dangNhung}>
+            <i className="fa-solid fa-arrows-rotate mr-2" />{dangNhung ? "Đang nhúng..." : "Nhúng lại toàn bộ"}
+          </Nut>
+        </section>
+      )}
+
       <section className="bg-white dark:bg-neutral-900 rounded shadow p-5 mb-5">
         <h2 className="font-bold mb-2">Kiểm tra truy xuất tri thức</h2>
-        <p className="text-sm text-gray-500 mb-3">Nhập câu hỏi như khách hàng sẽ hỏi để xem hệ thống tìm được đoạn nào, từ tài liệu nào, điểm liên quan bao nhiêu.</p>
+        <p className="text-sm text-gray-500 mb-3">Nhập câu hỏi như khách hàng sẽ hỏi để xem hệ thống tìm được đoạn nào, từ tài liệu nào, điểm liên quan bao nhiêu. Kết quả hợp nhất điểm từ khóa và điểm ngữ nghĩa (Vector DB) khi đã nhúng vector.</p>
         <div className="flex gap-2">
           <input className={oNhap} placeholder="Ví dụ: Giá dịch vụ chăm sóc khách hàng là bao nhiêu?"
             value={cauHoi} onChange={(e) => setCauHoi(e.target.value)}
@@ -136,7 +187,13 @@ export default function KhoTriThuc() {
                 <div key={k.chunk_id} className="border rounded p-3">
                   <div className="flex flex-wrap justify-between gap-2 text-sm">
                     <span className="font-medium"><i className="fa-regular fa-file-lines mr-1.5 text-gray-400" />{k.title}</span>
-                    <span className="text-gray-500">Điểm liên quan: <b>{k.score}</b> · Đoạn #{k.chunk_id}</span>
+                    <span className="text-gray-500">
+                      Điểm từ khóa: <b>{k.score}</b>
+                      {k.diem_ngu_nghia !== null && k.diem_ngu_nghia !== undefined && (
+                        <> · Điểm ngữ nghĩa: <b>{Number(k.diem_ngu_nghia).toFixed(3)}</b></>
+                      )}
+                      {" "}· Đoạn #{k.chunk_id}
+                    </span>
                   </div>
                   <p className="text-sm text-gray-700 dark:text-gray-200 mt-1.5 whitespace-pre-wrap">{k.content}</p>
                 </div>
@@ -150,7 +207,7 @@ export default function KhoTriThuc() {
         <ChuaCoDuLieu text="Kho tri thức đang trống. Hãy nhập tài liệu đầu tiên (bảng giá, chính sách, câu hỏi thường gặp...) để bot có dữ liệu trả lời." />
       ) : (
         <div className="bg-white dark:bg-neutral-900 rounded shadow overflow-auto">
-          <table className="min-w-full text-sm">
+          <table className="min-w-full text-sm bang-du-lieu">
             <thead>
               <tr className="text-left bg-gray-50 dark:bg-neutral-800">
                 <th className="p-3 border-b">Tiêu đề</th>
@@ -189,6 +246,13 @@ export default function KhoTriThuc() {
               ))}
             </tbody>
           </table>
+          {!dangTai && !loi && ds.length > 0 && (
+            <div className="px-3 pb-3">
+              <PhanTrang trang={trang} tongTrang={tongTrang} tong={tongMuc} kichThuoc={kichThuocTrang}
+                onDoiTrang={setTrang}
+                onDoiKichThuoc={(k) => { setKichThuocTrang(k); setTrang(1); }} />
+            </div>
+          )}
         </div>
       )}
 

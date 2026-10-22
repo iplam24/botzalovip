@@ -27,11 +27,61 @@ export function LoiTai({ loi, onThuLai }: { loi: string; onThuLai?: () => void }
   );
 }
 
-export function ChuaCoDuLieu({ text }: { text: string }) {
+export function ChuaCoDuLieu({ text, icon, huongDan }: { text: string; icon?: string; huongDan?: string }) {
   return (
     <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-the p-8 text-center text-gray-500">
-      <p className="text-4xl mb-2 text-gray-300"><i className="fa-regular fa-folder-open" /></p>
+      <p className="text-4xl mb-2 text-gray-300"><i className={icon || "fa-regular fa-folder-open"} /></p>
       <p>{text}</p>
+      {huongDan && <p className="text-sm mt-2 text-gray-400">{huongDan}</p>}
+    </div>
+  );
+}
+
+// Phân trang phía máy chủ dùng chung (Đợt nâng cấp 3, mục 1): nút Trước/Sau,
+// số trang rút gọn, chọn số mục mỗi trang (10/20/50/100) và dòng trạng thái
+// "Hiển thị x–y / tổng z mục". Tự ẩn khi chỉ có tối đa 1 trang VÀ tổng số mục
+// không vượt quá một trang (không có gì để phân trang).
+export function PhanTrang({ trang, tongTrang, tong, kichThuoc, onDoiTrang, onDoiKichThuoc }: {
+  trang: number; tongTrang: number; tong: number; kichThuoc: number;
+  onDoiTrang: (trangMoi: number) => void; onDoiKichThuoc: (k: number) => void;
+}) {
+  if (tongTrang <= 1 && tong <= kichThuoc) return null;
+  const tu = tong === 0 ? 0 : (trang - 1) * kichThuoc + 1;
+  const den = Math.min(tong, trang * kichThuoc);
+  const cacTrang: (number | "...")[] = [];
+  for (let i = 1; i <= tongTrang; i++) {
+    if (i === 1 || i === tongTrang || Math.abs(i - trang) <= 1) cacTrang.push(i);
+    else if (cacTrang[cacTrang.length - 1] !== "...") cacTrang.push("...");
+  }
+  const nutTrang = "min-w-8 h-8 px-1.5 rounded text-sm border bg-white dark:bg-neutral-900 hover:bg-gray-50 dark:hover:bg-neutral-800 disabled:opacity-40";
+  return (
+    <div className="flex flex-wrap items-center gap-3 mt-4 text-sm">
+      <span className="text-gray-500">Hiển thị {tu}–{den} / tổng {tong} mục</span>
+      <span className="flex items-center gap-1.5 ml-auto">
+        <button className={nutTrang} disabled={trang <= 1} onClick={() => onDoiTrang(trang - 1)} aria-label="Trang trước">
+          <i className="fa-solid fa-chevron-left text-xs" />
+        </button>
+        {cacTrang.map((t, i) =>
+          t === "..." ? (
+            <span key={`c${i}`} className="px-1 text-gray-400">…</span>
+          ) : (
+            <button key={t} onClick={() => onDoiTrang(t)}
+              className={`${nutTrang} ${t === trang ? "!bg-blue-600 !text-white !border-blue-600 font-semibold" : ""}`}>
+              {t}
+            </button>
+          ),
+        )}
+        <button className={nutTrang} disabled={trang >= tongTrang} onClick={() => onDoiTrang(trang + 1)} aria-label="Trang sau">
+          <i className="fa-solid fa-chevron-right text-xs" />
+        </button>
+      </span>
+      <label className="flex items-center gap-1.5 text-gray-500">
+        Mỗi trang
+        <select value={kichThuoc} onChange={(e) => onDoiKichThuoc(Number(e.target.value))}
+          className="border rounded px-2 py-1.5 text-sm bg-white dark:bg-neutral-800 dark:border-neutral-700">
+          {[10, 20, 50, 100].map((k) => <option key={k} value={k}>{k} mục</option>)}
+        </select>
+      </label>
     </div>
   );
 }

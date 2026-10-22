@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, dinhDangThoiGian } from "../lib/api";
-import { ChuaCoDuLieu, DangTai, LoiTai, Nut, TieuDeTrang, oNhap } from "../components/dungChung";
+import { ChuaCoDuLieu, DangTai, LoiTai, Nut, PhanTrang, TieuDeTrang, oNhap } from "../components/dungChung";
 
-// Nhật ký hệ thống: lọc phía máy chủ theo mức độ / phân hệ / từ khóa (tối đa 200 dòng gần nhất).
+// Nhật ký hệ thống: lọc + PHÂN TRANG phía máy chủ theo mức độ / phân hệ / từ khóa (Đợt 3 mục 1).
 // Không ghi khóa API hay mật khẩu vào nhật ký.
 const NHAN_MUC_DO: Record<string, { nhan: string; mau: string }> = {
   info: { nhan: "Thông tin", mau: "bg-blue-100 text-blue-800" },
@@ -17,6 +17,10 @@ export default function NhatKyHeThong() {
   const [mucDo, setMucDo] = useState("");
   const [moduleLoc, setModuleLoc] = useState("");
   const [tuKhoa, setTuKhoa] = useState("");
+  const [trang, setTrang] = useState(1);
+  const [kichThuocTrang, setKichThuocTrang] = useState(20);
+  const [tongMuc, setTongMuc] = useState(0);
+  const [tongTrang, setTongTrang] = useState(1);
 
   const tai = useCallback(async () => {
     setDangTai(true);
@@ -26,13 +30,18 @@ export default function NhatKyHeThong() {
       if (mucDo) thamSo.set("muc_do", mucDo);
       if (moduleLoc) thamSo.set("module", moduleLoc);
       if (tuKhoa.trim()) thamSo.set("tu_khoa", tuKhoa.trim());
-      setDs(await api(`/api/nhat-ky?${thamSo.toString()}`));
+      thamSo.set("trang", String(trang));
+      thamSo.set("kich_thuoc_trang", String(kichThuocTrang));
+      const kq = await api(`/api/nhat-ky?${thamSo.toString()}`);
+      setDs(Array.isArray(kq) ? kq : kq.muc || []);
+      setTongMuc(Array.isArray(kq) ? kq.length : kq.tong || 0);
+      setTongTrang(Array.isArray(kq) ? 1 : kq.tong_trang || 1);
     } catch (e: any) {
       setLoi(e.message);
     } finally {
       setDangTai(false);
     }
-  }, [mucDo, moduleLoc, tuKhoa]);
+  }, [mucDo, moduleLoc, tuKhoa, trang, kichThuocTrang]);
 
   useEffect(() => {
     const t = setTimeout(tai, tuKhoa ? 400 : 0);
@@ -50,25 +59,25 @@ export default function NhatKyHeThong() {
 
       <div className="bg-white dark:bg-neutral-900 rounded shadow">
         <div className="p-3 border-b grid md:grid-cols-3 gap-2">
-          <select className={oNhap} value={mucDo} onChange={(e) => setMucDo(e.target.value)}>
+          <select className={oNhap} value={mucDo} onChange={(e) => { setMucDo(e.target.value); setTrang(1); }}>
             <option value="">Tất cả mức độ</option>
             <option value="info">Thông tin</option>
             <option value="warning">Cảnh báo</option>
             <option value="error">Lỗi</option>
           </select>
-          <select className={oNhap} value={moduleLoc} onChange={(e) => setModuleLoc(e.target.value)}>
+          <select className={oNhap} value={moduleLoc} onChange={(e) => { setModuleLoc(e.target.value); setTrang(1); }}>
             <option value="">Tất cả phân hệ</option>
             {dsModule.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
           <input className={oNhap} placeholder="Tìm theo từ khóa trong nội dung..."
-            value={tuKhoa} onChange={(e) => setTuKhoa(e.target.value)} />
+            value={tuKhoa} onChange={(e) => { setTuKhoa(e.target.value); setTrang(1); }} />
         </div>
 
         {dangTai ? <DangTai /> : loi ? <LoiTai loi={loi} onThuLai={tai} /> : ds.length === 0 ? (
           <div className="p-4"><ChuaCoDuLieu text="Chưa có dòng nhật ký nào khớp bộ lọc." /></div>
         ) : (
           <div className="overflow-auto">
-            <table className="min-w-full text-sm">
+            <table className="min-w-full text-sm bang-du-lieu">
               <thead>
                 <tr className="text-left bg-gray-50 dark:bg-neutral-800">
                   <th className="p-3 border-b">Thời gian</th>
@@ -97,8 +106,15 @@ export default function NhatKyHeThong() {
             </table>
           </div>
         )}
+        {!dangTai && !loi && ds.length > 0 && (
+          <div className="px-3 pb-3">
+            <PhanTrang trang={trang} tongTrang={tongTrang} tong={tongMuc} kichThuoc={kichThuocTrang}
+              onDoiTrang={setTrang}
+              onDoiKichThuoc={(k) => { setKichThuocTrang(k); setTrang(1); }} />
+          </div>
+        )}
       </div>
-      <p className="text-xs text-gray-400 mt-3">Hiển thị tối đa 200 dòng gần nhất theo bộ lọc hiện tại.</p>
+      <p className="text-xs text-gray-400 mt-3">Nhật ký được phân trang phía máy chủ — bộ lọc hiện tại được giữ nguyên khi chuyển trang.</p>
     </div>
   );
 }

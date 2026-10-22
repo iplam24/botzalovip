@@ -11,4 +11,7 @@ openpyxl==3.1.5
 cryptography==44.0.0
 psycopg2-binary==2.9.10
 redis==5.2.1
+# Đợt 3 mục 3 (Vector DB): nhúng văn bản local khi provider không có /embeddings.
+# Import tùy chọn an toàn: chưa cài thì hệ thống tự rơi về tìm từ khóa (xem embedding_service).
+fastembed==0.4.2
 pytest==8.3.4

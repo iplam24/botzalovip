@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api, apiTaiFile, dinhDangThoiGian, taiBlobXuong } from "../lib/api";
 import {
-  ChuaCoDuLieu, DangTai, HopBieuMau, HopXacNhan, LoiTai, Nut, ThongBao, TieuDeTrang, Truong, oNhap,
+  ChuaCoDuLieu, DangTai, HopBieuMau, HopXacNhan, LoiTai, Nut, PhanTrang, ThongBao, TieuDeTrang, Truong, oNhap,
 } from "../components/dungChung";
 import { useToast } from "../components/Toast";
 
@@ -113,17 +113,25 @@ function BangThongTinThuThap({ khach, baoLoi }: { khach: any; baoLoi: (text: str
   const [giaTriMoi, setGiaTriMoi] = useState("");
   const [suaId, setSuaId] = useState<number | null>(null);
   const [giaTriSua, setGiaTriSua] = useState("");
+  // Phân trang phía máy chủ cho danh sách thông tin thu thập (Đợt 3 mục 1)
+  const [trangTT, setTrangTT] = useState(1);
+  const [kichThuocTT, setKichThuocTT] = useState(10);
+  const [tongTT, setTongTT] = useState(0);
+  const [tongTrangTT, setTongTrangTT] = useState(1);
 
   const tai = useCallback(async () => {
     setDangTai(true);
     try {
-      setDs(await api(`/api/khach-hang/${khach.id}/thong-tin-thu-thap`));
+      const kq = await api(`/api/khach-hang/${khach.id}/thong-tin-thu-thap?trang=${trangTT}&kich_thuoc_trang=${kichThuocTT}`);
+      setDs(Array.isArray(kq) ? kq : kq.muc || []);
+      setTongTT(Array.isArray(kq) ? kq.length : kq.tong || 0);
+      setTongTrangTT(Array.isArray(kq) ? 1 : kq.tong_trang || 1);
     } catch (e: any) {
       baoLoi(e.message);
     } finally {
       setDangTai(false);
     }
-  }, [khach.id, baoLoi]);
+  }, [khach.id, baoLoi, trangTT, kichThuocTT]);
 
   useEffect(() => { tai(); }, [tai]);
 
@@ -183,7 +191,7 @@ function BangThongTinThuThap({ khach, baoLoi }: { khach: any; baoLoi: (text: str
           Chưa thu thập được thông tin nào. Bot sẽ tự bóc tách số điện thoại, email, nhu cầu... từ các tin nhắn tiếp theo của khách.
         </p>
       ) : (
-        <table className="min-w-full text-sm mb-3">
+        <table className="min-w-full text-sm mb-3 bang-du-lieu">
           <thead>
             <tr className="text-left bg-gray-50 dark:bg-neutral-800">
               <th className="p-2 border-b">Trường</th>
@@ -236,6 +244,9 @@ function BangThongTinThuThap({ khach, baoLoi }: { khach: any; baoLoi: (text: str
           </tbody>
         </table>
       )}
+      <PhanTrang trang={trangTT} tongTrang={tongTrangTT} tong={tongTT} kichThuoc={kichThuocTT}
+        onDoiTrang={setTrangTT}
+        onDoiKichThuoc={(k) => { setKichThuocTT(k); setTrangTT(1); }} />
       <div className="flex gap-2 items-end border-t pt-3">
         <div className="w-44">
           <span className="block text-sm font-medium mb-1">Thêm trường</span>
@@ -272,19 +283,28 @@ export default function KhachHang() {
   const [dangXuat, setDangXuat] = useState(false);
   const [khachThuThap, setKhachThuThap] = useState<any | null>(null);
   const [thongBao, setThongBao] = useState<{ loai: "thanh_cong" | "loi"; text: string } | null>(null);
+  // Phân trang phía máy chủ (Đợt 3 mục 1)
+  const [trang, setTrang] = useState(1);
+  const [kichThuocTrang, setKichThuocTrang] = useState(20);
+  const [tongMuc, setTongMuc] = useState(0);
+  const [tongTrang, setTongTrang] = useState(1);
 
   const tai = useCallback(async () => {
     setDangTai(true);
     setLoi("");
     try {
-      const thamSo = tuKhoa.trim() ? `?tu_khoa=${encodeURIComponent(tuKhoa.trim())}` : "";
-      setDs(await api(`/api/khach-hang${thamSo}`));
+      const thamSo = new URLSearchParams({ trang: String(trang), kich_thuoc_trang: String(kichThuocTrang) });
+      if (tuKhoa.trim()) thamSo.set("tu_khoa", tuKhoa.trim());
+      const kq = await api(`/api/khach-hang?${thamSo.toString()}`);
+      setDs(Array.isArray(kq) ? kq : kq.muc || []);
+      setTongMuc(Array.isArray(kq) ? kq.length : kq.tong || 0);
+      setTongTrang(Array.isArray(kq) ? 1 : kq.tong_trang || 1);
     } catch (e: any) {
       setLoi(e.message);
     } finally {
       setDangTai(false);
     }
-  }, [tuKhoa]);
+  }, [tuKhoa, trang, kichThuocTrang]);
 
   useEffect(() => {
     const t = setTimeout(tai, tuKhoa ? 350 : 0);
@@ -370,14 +390,14 @@ export default function KhachHang() {
       <div className="bg-white dark:bg-neutral-900 rounded shadow">
         <div className="p-3 border-b flex gap-2">
           <input className={oNhap} placeholder="Tìm theo tên, số điện thoại hoặc ghi chú..."
-            value={tuKhoa} onChange={(e) => setTuKhoa(e.target.value)} />
+            value={tuKhoa} onChange={(e) => { setTuKhoa(e.target.value); setTrang(1); }} />
           <Nut mau="xam" onClick={tai}>Tìm kiếm</Nut>
         </div>
         {dangTai ? <DangTai /> : loi ? <LoiTai loi={loi} onThuLai={tai} /> : ds.length === 0 ? (
           <div className="p-4"><ChuaCoDuLieu text="Chưa có khách hàng nào. Khách hàng tự được tạo khi có tin nhắn đến, hoặc bấm “Thêm khách hàng” để nhập tay." /></div>
         ) : (
           <div className="overflow-auto">
-            <table className="min-w-full text-sm">
+            <table className="min-w-full text-sm bang-du-lieu">
               <thead>
                 <tr className="text-left bg-gray-50 dark:bg-neutral-800">
                   <th className="p-3 border-b">Tên hiển thị</th>
@@ -412,6 +432,13 @@ export default function KhachHang() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {!dangTai && !loi && ds.length > 0 && (
+          <div className="px-3 pb-3">
+            <PhanTrang trang={trang} tongTrang={tongTrang} tong={tongMuc} kichThuoc={kichThuocTrang}
+              onDoiTrang={setTrang}
+              onDoiKichThuoc={(k) => { setKichThuocTrang(k); setTrang(1); }} />
           </div>
         )}
       </div>

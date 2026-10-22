@@ -42,7 +42,34 @@ def overview(db: Session = Depends(get_db), u: User = Depends(get_current_user))
              "status": provider_mac_dinh.status} if provider_mac_dinh else None
         ),
         "tai_khoan_zalo": tai_khoan_zalo,
+        # Hoạt động 7 ngày gần nhất (Đợt 3 mục 4: mini bar chart ở trang Tổng
+        # quan). Chỉ THÊM trường mới, không đổi các trường hiện có.
+        "hoat_dong_7_ngay": _hoat_dong_7_ngay(db),
     }
+
+
+def _hoat_dong_7_ngay(db: Session):
+    from datetime import timedelta
+    hom_nay = datetime.now().date()
+    tu_ngay = hom_nay - timedelta(days=6)
+    theo_ngay = {}
+    moc = datetime(tu_ngay.year, tu_ngay.month, tu_ngay.day)
+    for m in db.query(Message).filter(Message.created_at >= moc).all():
+        ngay = m.created_at.date() if m.created_at else tu_ngay
+        dong = theo_ngay.setdefault(ngay, {"tin_khach": 0, "tin_bot": 0, "tin_nhan_vien": 0})
+        if m.sender_type == "khach":
+            dong["tin_khach"] += 1
+        elif m.sender_type == "bot":
+            dong["tin_bot"] += 1
+        elif m.sender_type == "nhan_vien":
+            dong["tin_nhan_vien"] += 1
+    ket_qua = []
+    for i in range(7):
+        ngay = tu_ngay + timedelta(days=i)
+        dong = theo_ngay.get(ngay, {"tin_khach": 0, "tin_bot": 0, "tin_nhan_vien": 0})
+        ket_qua.append({"ngay": ngay.isoformat(), **dong,
+                        "tong": dong["tin_khach"] + dong["tin_bot"] + dong["tin_nhan_vien"]})
+    return ket_qua
 
 
 def _loc_theo_thoi_gian(query, cot, tu_ngay: str = "", den_ngay: str = ""):
@@ -177,8 +204,11 @@ def logs(
     muc_do: str = Query(default="", description="Lọc theo mức độ: info, warning, error"),
     module: str = Query(default="", description="Lọc theo phân hệ"),
     tu_khoa: str = Query(default="", description="Tìm trong nội dung nhật ký"),
+    trang: int = Query(default=0, description="Trang (từ 1) — có truyền thì trả dạng phân trang"),
+    kich_thuoc_trang: int = Query(default=20, description="Số dòng mỗi trang: 10/20/50/100"),
     db: Session = Depends(get_db), u: User = Depends(get_current_user),
 ):
+    from ..services.phan_trang import co_phan_trang, trang_hoa
     q = db.query(SystemLog)
     if muc_do:
         q = q.filter(SystemLog.level == muc_do)
@@ -186,8 +216,12 @@ def logs(
         q = q.filter(SystemLog.module == module)
     if tu_khoa:
         q = q.filter(SystemLog.message.contains(tu_khoa))
-    return [
-        {"id": l.id, "level": l.level, "module": l.module, "message": l.message,
-         "trace_id": l.trace_id, "created_at": str(l.created_at)}
-        for l in q.order_by(SystemLog.id.desc()).limit(200).all()
-    ]
+    q = q.order_by(SystemLog.id.desc())
+    def _out(l):
+        return {"id": l.id, "level": l.level, "module": l.module, "message": l.message,
+                "trace_id": l.trace_id, "created_at": str(l.created_at)}
+    # Phân trang (mục 1 đợt 3): có trang -> phân trang trên toàn bộ kết quả lọc;
+    # không truyền -> giữ hành vi cũ (tối đa 200 dòng gần nhất).
+    if co_phan_trang(trang):
+        return trang_hoa([_out(l) for l in q.all()], trang, kich_thuoc_trang)
+    return [_out(l) for l in q.limit(200).all()]

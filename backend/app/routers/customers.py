@@ -10,6 +10,7 @@ from ..models import Customer, Conversation, CollectedInfo, User
 from ..schemas import CustomerIn, CollectedInfoIn, CollectedInfoUpdate
 from ..deps import get_current_user, require_admin
 from ..services.extraction_service import CAC_TRUONG
+from ..services.phan_trang import co_phan_trang, trang_hoa
 
 router = APIRouter(prefix="/api/khach-hang", tags=["Khách hàng"])
 
@@ -18,13 +19,16 @@ XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 def out(c): return {"id": c.id, "external_id": c.external_id, "display_name": c.display_name, "phone": c.phone, "email": c.email or "", "labels": c.labels, "group_name": c.group_name, "notes": c.notes, "assignee": c.assignee, "memory_summary": getattr(c, "memory_summary", "") or "", "last_interaction_at": str(c.last_interaction_at) if c.last_interaction_at else "", "created_at": str(c.created_at) if c.created_at else ""}
 
 @router.get("")
-def list_c(tu_khoa: str = "", nhan: str = "", db: Session = Depends(get_db), u: User = Depends(get_current_user)):
+def list_c(tu_khoa: str = "", nhan: str = "", trang: int = 0, kich_thuoc_trang: int = 20, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     q = db.query(Customer)
     if tu_khoa:
         tk = f"%{tu_khoa}%"
         q = q.filter((Customer.display_name.like(tk)) | (Customer.phone.like(tk)) | (Customer.notes.like(tk)))
     if nhan: q = q.filter(Customer.labels.contains(nhan))
-    return [out(c) for c in q.order_by(Customer.id.desc()).all()]
+    ds = [out(c) for c in q.order_by(Customer.id.desc()).all()]
+    if co_phan_trang(trang):
+        return trang_hoa(ds, trang, kich_thuoc_trang)
+    return ds
 
 def _loc_khach(db: Session, tu_khoa: str = "", nhan: str = "", tu_ngay: str = "", den_ngay: str = ""):
     q = db.query(Customer)
@@ -120,9 +124,12 @@ def _khach_hoac_404(db: Session, cid: int):
     return c
 
 @router.get("/{cid}/thong-tin-thu-thap")
-def ds_thu_thap(cid: int, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
+def ds_thu_thap(cid: int, trang: int = 0, kich_thuoc_trang: int = 20, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     _khach_hoac_404(db, cid)
-    return [tt_out(t) for t in db.query(CollectedInfo).filter(CollectedInfo.customer_id == cid).order_by(CollectedInfo.id.desc()).all()]
+    ds = [tt_out(t) for t in db.query(CollectedInfo).filter(CollectedInfo.customer_id == cid).order_by(CollectedInfo.id.desc()).all()]
+    if co_phan_trang(trang):
+        return trang_hoa(ds, trang, kich_thuoc_trang)
+    return ds
 
 @router.post("/{cid}/thong-tin-thu-thap")
 def them_thu_thap(cid: int, data: CollectedInfoIn, db: Session = Depends(get_db), u: User = Depends(get_current_user)):

@@ -1,7 +1,8 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import DangNhap from "./pages/DangNhap";
-import { ToastProvider } from "./components/Toast";
-import { DangTai } from "./components/dungChung";
+import { ToastProvider, useToast } from "./components/Toast";
+import { DangTai, HopBieuMau, Nut, Truong, oNhap } from "./components/dungChung";
+import { api } from "./lib/api";
 
 // Code-splitting theo trang (mục 8): mỗi phân hệ là một chunk riêng, chỉ tải khi mở.
 const TongQuan = lazy(() => import("./pages/TongQuan"));
@@ -19,6 +20,7 @@ const NhatKy = lazy(() => import("./pages/NhatKyHeThong"));
 const PhanTich = lazy(() => import("./pages/PhanTich"));
 const SaoLuu = lazy(() => import("./pages/SaoLuu"));
 const CaiDat = lazy(() => import("./pages/CaiDat"));
+const TroLyCauHinh = lazy(() => import("./pages/TroLyCauHinh"));
 const KiemThuAI = lazy(() => import("./pages/KiemThuAI"));
 const NguoiDung = lazy(() => import("./pages/NguoiDung"));
 
@@ -40,6 +42,7 @@ const MENU: { ten: string; icon: string; thanhPhan: any }[] = [
   { ten: "Sao lưu và khôi phục", icon: "fa-solid fa-database", thanhPhan: SaoLuu },
   { ten: "Người dùng", icon: "fa-solid fa-user-gear", thanhPhan: NguoiDung },
   { ten: "Cài đặt", icon: "fa-solid fa-gear", thanhPhan: CaiDat },
+  { ten: "Trợ lý cấu hình", icon: "fa-solid fa-terminal", thanhPhan: TroLyCauHinh },
   { ten: "Trung tâm kiểm thử AI", icon: "fa-solid fa-flask", thanhPhan: KiemThuAI },
 ];
 
@@ -54,6 +57,40 @@ function UngDung() {
   const [tenNguoiDung, setTenNguoiDung] = useState("");
   const [soThongBaoChuaDoc, setSoThongBaoChuaDoc] = useState(0);
   const [cheDoTuDo, setCheDoTuDo] = useState(false);
+  // Menu tài khoản + đổi mật khẩu tự phục vụ (Đợt nâng cấp 3, mục nhỏ)
+  const toast = useToast();
+  const [moMenuTaiKhoan, setMoMenuTaiKhoan] = useState(false);
+  const [moDoiMatKhau, setMoDoiMatKhau] = useState(false);
+  const [mkCu, setMkCu] = useState("");
+  const [mkMoi, setMkMoi] = useState("");
+  const [mkNhapLai, setMkNhapLai] = useState("");
+  const [loiMk, setLoiMk] = useState("");
+  const [dangDoiMk, setDangDoiMk] = useState(false);
+
+  const dongFormDoiMatKhau = () => {
+    setMoDoiMatKhau(false);
+    setMkCu(""); setMkMoi(""); setMkNhapLai(""); setLoiMk("");
+  };
+
+  const guiDoiMatKhau = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoiMk("");
+    if (mkMoi.length < 6) { setLoiMk("Mật khẩu mới phải có tối thiểu 6 ký tự."); return; }
+    if (mkMoi !== mkNhapLai) { setLoiMk("Mật khẩu mới nhập lại chưa khớp."); return; }
+    setDangDoiMk(true);
+    try {
+      await api("/api/auth/doi-mat-khau", {
+        method: "POST",
+        body: JSON.stringify({ mat_khau_cu: mkCu, mat_khau_moi: mkMoi }),
+      });
+      dongFormDoiMatKhau();
+      toast.thanhCong("Đã đổi mật khẩu");
+    } catch (err: any) {
+      setLoiMk(err.message || "Không đổi được mật khẩu, thử lại sau.");
+    } finally {
+      setDangDoiMk(false);
+    }
+  };
 
   // Header: kiểm tra sức khỏe thật qua /api/suc-khoe mỗi 30 giây
   useEffect(() => {
@@ -135,7 +172,7 @@ function UngDung() {
       <div className="flex items-center justify-between mb-3 px-1">
         {!thuGonHienThi && (
           <div className="font-bold text-lg text-white flex items-center gap-2">
-            <span className="w-8 h-8 rounded-lg flex items-center justify-center text-white" style={{ background: "var(--mau-chu-dao)" }}>
+            <span className="w-8 h-8 rounded-lg flex items-center justify-center text-white logo-thuong-hieu">
               <i className="fa-solid fa-comments text-sm" />
             </span>
             Zalo AI Hub
@@ -194,10 +231,33 @@ function UngDung() {
         )}
       </nav>
       {!thuGonHienThi && tenNguoiDung && (
-        <p className="text-xs text-slate-400 border-t border-slate-800 pt-3 mt-3 break-all px-1">
-          <i className="fa-solid fa-circle-user mr-1.5" />
-          {tenNguoiDung}
-        </p>
+        <div className="relative border-t border-slate-800 pt-3 mt-3 px-1">
+          <button
+            className="flex items-center gap-1.5 w-full text-left text-xs text-slate-400 hover:text-white transition-colors"
+            onClick={() => setMoMenuTaiKhoan(!moMenuTaiKhoan)}
+            title="Tài khoản của tôi"
+          >
+            <i className="fa-solid fa-circle-user" />
+            <span className="break-all flex-1">{tenNguoiDung}</span>
+            <i className={`fa-solid ${moMenuTaiKhoan ? "fa-chevron-down" : "fa-chevron-up"} text-[10px]`} />
+          </button>
+          {moMenuTaiKhoan && (
+            <div className="absolute bottom-full left-1 right-1 mb-2 bg-slate-800 border border-slate-700 rounded-lg shadow-xl py-1 z-20">
+              <button
+                className="flex items-center gap-2.5 w-full text-left px-3 py-2 text-sm text-slate-200 hover:bg-slate-700"
+                onClick={() => { setMoMenuTaiKhoan(false); setMoDoiMatKhau(true); }}
+              >
+                <i className="fa-solid fa-key w-4 text-center" /> Đổi mật khẩu
+              </button>
+              <button
+                className="flex items-center gap-2.5 w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-slate-700"
+                onClick={() => { localStorage.removeItem("token"); setDaDangNhap(false); }}
+              >
+                <i className="fa-solid fa-right-from-bracket w-4 text-center" /> Đăng xuất
+              </button>
+            </div>
+          )}
+        </div>
       )}
       <button
         className="flex items-center gap-3 text-left text-sm text-slate-300 hover:text-white mt-2 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors duration-160"
@@ -294,6 +354,36 @@ function UngDung() {
             </Suspense>
           </div>
         </main>
+
+        {/* Đổi mật khẩu tự phục vụ: phiên đăng nhập được giữ nguyên sau khi đổi */}
+        <HopBieuMau mo={moDoiMatKhau} tieuDe="Đổi mật khẩu" onDong={dongFormDoiMatKhau} rong="max-w-md">
+          <form onSubmit={guiDoiMatKhau}>
+            {loiMk && (
+              <div className="border border-red-300 bg-red-50 text-red-700 p-3 rounded text-sm mb-4">
+                <i className="fa-solid fa-circle-exclamation mr-1.5" />{loiMk}
+              </div>
+            )}
+            <Truong nhan="Mật khẩu hiện tại" batBuoc>
+              <input type="password" className={oNhap} value={mkCu} autoComplete="current-password"
+                onChange={(e) => setMkCu(e.target.value)} placeholder="Nhập mật khẩu đang dùng" />
+            </Truong>
+            <Truong nhan="Mật khẩu mới (tối thiểu 6 ký tự)" batBuoc>
+              <input type="password" className={oNhap} value={mkMoi} autoComplete="new-password"
+                onChange={(e) => setMkMoi(e.target.value)} placeholder="Nhập mật khẩu mới" />
+            </Truong>
+            <Truong nhan="Nhập lại mật khẩu mới" batBuoc>
+              <input type="password" className={oNhap} value={mkNhapLai} autoComplete="new-password"
+                onChange={(e) => setMkNhapLai(e.target.value)} placeholder="Nhập lại đúng mật khẩu mới" />
+            </Truong>
+            <p className="text-xs text-gray-500 mb-1">Sau khi đổi, bạn vẫn đang đăng nhập bình thường — chỉ lần đăng nhập sau mới cần mật khẩu mới.</p>
+            <div className="flex justify-end gap-2 mt-4">
+              <Nut mau="xam" onClick={dongFormDoiMatKhau}>Hủy bỏ</Nut>
+              <Nut type="submit" disabled={dangDoiMk || !mkCu || !mkMoi || !mkNhapLai}>
+                {dangDoiMk ? "Đang đổi..." : "Đổi mật khẩu"}
+              </Nut>
+            </div>
+          </form>
+        </HopBieuMau>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ from ..database import get_db
 from ..models import Conversation, Message, User
 from ..schemas import SendMessageIn
 from ..deps import get_current_user
+from ..services.phan_trang import co_phan_trang, trang_hoa
 router = APIRouter(prefix="/api/hoi-thoai", tags=["Hội thoại"])
 def out(c, db=None):
     d = {"id": c.id, "customer_id": c.customer_id, "status": c.status, "channel": getattr(c, "channel", "mo_phong"), "bot_enabled": c.bot_enabled, "human_takeover": c.human_takeover, "labels": c.labels, "priority": c.priority, "assignee": c.assignee, "created_at": str(c.created_at) if c.created_at else "", "updated_at": str(c.updated_at) if c.updated_at else ""}
@@ -19,7 +20,7 @@ def out(c, db=None):
         d["message_count"] = db.query(Message).filter(Message.conversation_id == c.id).count()
     return d
 @router.get("")
-def list_c(trang_thai: str = "", tu_khoa: str = "", loc_tin: str = "", db: Session = Depends(get_db), u: User = Depends(get_current_user)):
+def list_c(trang_thai: str = "", tu_khoa: str = "", loc_tin: str = "", trang: int = 0, kich_thuoc_trang: int = 20, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     """Danh sách hội thoại — sắp xếp theo HOẠT ĐỘNG GẦN NHẤT (tin cuối mới nhất
     lên đầu, hội thoại chưa có tin xếp theo thời gian cập nhật). loc_tin:
     'da_nhan_tin' (>= 1 tin) | 'chua_nhan_tin' (0 tin) — mục 9.2."""
@@ -35,6 +36,10 @@ def list_c(trang_thai: str = "", tu_khoa: str = "", loc_tin: str = "", db: Sessi
         tk = tu_khoa.lower()
         ket_qua = [c for c in ket_qua if tk in (c.get("customer_name","") + " " + c.get("last_message","")).lower()]
     ket_qua.sort(key=lambda c: (c.get("last_message_at") or "", c.get("updated_at") or ""), reverse=True)
+    # Phân trang phía máy chủ (mục 1 đợt 3): chỉ khi client truyền trang >= 1,
+    # bộ lọc ở trên được giữ nguyên cho mọi trang.
+    if co_phan_trang(trang):
+        return trang_hoa(ket_qua, trang, kich_thuoc_trang)
     return ket_qua
 @router.get("/{cid}")
 def get_c(cid:int, db: Session = Depends(get_db), u: User = Depends(get_current_user)):

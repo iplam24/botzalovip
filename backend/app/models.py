@@ -91,6 +91,9 @@ class KnowledgeChunk(Base):
     __tablename__ = "knowledge_chunks"
     id = Column(Integer, primary_key=True); document_id = Column(Integer, ForeignKey("knowledge_documents.id"), index=True)
     content = Column(Text, default=""); normalized = Column(Text, default=""); chunk_index = Column(Integer, default=0)
+    # Đợt 3 mục 3 (Vector DB): vector nhúng lưu dạng JSON text (list float) để
+    # chạy được cả SQLite lẫn Postgres; tính cosine bằng Python (xem embedding_service)
+    embedding = Column(Text, default="")
     document = relationship("KnowledgeDocument", back_populates="chunks")
 
 class MemoryItem(Base):
@@ -98,6 +101,8 @@ class MemoryItem(Base):
     id = Column(Integer, primary_key=True); customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True, index=True)
     memory_type = Column(String, default="ngu_nghia")  # hoi_thoai, su_kien, ngu_nghia, nghiep_vu, quy_trinh, so_thich
     content = Column(Text, nullable=False); source = Column(String, default="he_thong")
+    # Đợt 3 mục 3 (Vector DB): vector nhúng JSON text, tương tự knowledge_chunks
+    embedding = Column(Text, default="")
     confidence = Column(Float, default=0.8); verified = Column(Boolean, default=False); pinned = Column(Boolean, default=False)
     created_at = Column(DateTime, default=now); updated_at = Column(DateTime, default=now, onupdate=now)
 

@@ -5,6 +5,25 @@
 :root {
   /* Màu thương hiệu mặc định — App ghi đè bằng cài đặt mau_chu_dao_giao_dien */
   --mau-chu-dao: #0068ff;
+  /* Hệ biến thiết kế dùng chung (Đợt nâng cấp 3, mục 4 — design pass):
+     màu nền/chữ/viền theo tầng, khoảng cách + bo góc + bóng đổ nhất quán. */
+  --nen-trang: #ffffff;
+  --nen-phu: #f8fafc;
+  --vien-nhe: #e5e7eb;
+  --chu-chinh: #111827;
+  --chu-phu: #6b7280;
+  --bo-goc-the: 0.75rem;   /* thẻ (card) */
+  --bo-goc-nut: 0.5rem;    /* nút/ô nhập */
+  --bong-the: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --bong-nhe: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --khoang-trang: 1.25rem; /* khoảng đệm chuẩn trong trang */
+}
+.dark {
+  --nen-trang: #171717;
+  --nen-phu: #0a0a0a;
+  --vien-nhe: #262626;
+  --chu-chinh: #f5f5f5;
+  --chu-phu: #a3a3a3;
 }
 
 html {
@@ -44,6 +63,37 @@ body {
   background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
   background-size: 200% 100%;
   border-radius: 0.5rem;
+}
+/* Skeleton ở chế độ tối: tông trầm, tránh chói mắt (design pass đợt 3) */
+.dark .skeleton {
+  background: linear-gradient(90deg, #262626 25%, #333333 50%, #262626 75%);
+  background-size: 200% 100%;
+}
+
+/* Bảng dữ liệu dùng chung (design pass đợt 3): hàng sọc zebra + hover nổi.
+   Gắn class "bang-du-lieu" vào <table> — áp cho thead/tbody sẵn có. */
+.bang-du-lieu { border-collapse: separate; border-spacing: 0; width: 100%; }
+.bang-du-lieu thead th {
+  text-align: left; font-weight: 600; color: var(--chu-phu);
+  background: var(--nen-phu); border-bottom: 1px solid var(--vien-nhe);
+}
+.bang-du-lieu tbody tr { transition: background 120ms ease; }
+.bang-du-lieu tbody tr:nth-child(even) { background: rgba(100, 116, 139, 0.045); }
+.bang-du-lieu tbody tr:hover { background: rgba(0, 104, 255, 0.07); }
+.dark .bang-du-lieu tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.03); }
+.dark .bang-du-lieu tbody tr:hover { background: rgba(96, 165, 250, 0.12); }
+
+/* Thẻ thống kê Tổng quan: icon trong ô bo góc dùng màu thương hiệu (design pass) */
+.the-thong-ke-icon {
+  width: 2.75rem; height: 2.75rem; border-radius: var(--bo-goc-the);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.15rem; flex: none;
+}
+
+/* Logo thương hiệu ở sidebar: chip gradient xanh (design pass đợt 3) */
+.logo-thuong-hieu {
+  background: linear-gradient(135deg, var(--mau-chu-dao), #38bdf8);
+  box-shadow: 0 4px 14px rgba(0, 104, 255, 0.35);
 }
 
 /* Nút gạt (toggle switch) dùng chung — điều khiển bằng checkbox ẩn */

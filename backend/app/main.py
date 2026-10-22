@@ -7,12 +7,12 @@ from .models import User, AIProviderConfig, ZaloAccount, SystemLog
 from .security import hash_password, encrypt_secret
 import os
 from .config import settings
-from .routers import auth, ai_providers, customers, conversations, services_router, knowledge, memories, automation, zalo, logs_analytics, backup, ai_test, cai_dat, notifications, ban_be
+from .routers import auth, ai_providers, customers, conversations, services_router, knowledge, memories, automation, zalo, logs_analytics, backup, ai_test, cai_dat, notifications, ban_be, cau_hinh_chat
 
 app = FastAPI(title="Zalo AI Hub", description="Nền tảng AI tự động hóa Zalo - giao diện và API tiếng Việt", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://localhost:3000"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-for r in [auth.router, ai_providers.router, customers.router, conversations.router, services_router.router, knowledge.router, memories.router, automation.router, zalo.router, logs_analytics.router, backup.router, ai_test.router, cai_dat.router, notifications.router, ban_be.router]:
+for r in [auth.router, ai_providers.router, customers.router, conversations.router, services_router.router, knowledge.router, memories.router, automation.router, zalo.router, logs_analytics.router, backup.router, ai_test.router, cai_dat.router, notifications.router, ban_be.router, cau_hinh_chat.router]:
     app.include_router(r)
 
 def seed():
@@ -46,6 +46,25 @@ def seed():
         try:
             with engine.begin() as conn:
                 conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)"))
+        except Exception:
+            pass
+        # Đợt nâng cấp 3, mục 3 (Vector DB): cột embedding (JSON text) cho
+        # knowledge_chunks + memories — kiểu TEXT chạy được cả Postgres lẫn SQLite.
+        for bang in ("knowledge_chunks", "memories"):
+            try:
+                cot = [c["name"] for c in insp.get_columns(bang)]
+                if "embedding" not in cot:
+                    with engine.begin() as conn:
+                        conn.execute(text(f"ALTER TABLE {bang} ADD COLUMN embedding TEXT DEFAULT ''"))
+            except Exception:
+                pass
+        # Trên Postgres (image pgvector): thử bật extension vector để sẵn sàng
+        # cho nâng cấp sau. Việc truy hồi hiện tại vẫn dùng JSON + cosine Python
+        # (đã ghi rõ trong BAO_CAO) nên bật extension thất bại cũng KHÔNG sao.
+        try:
+            if engine.dialect.name == "postgresql":
+                with engine.begin() as conn:
+                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         except Exception:
             pass
     except Exception:

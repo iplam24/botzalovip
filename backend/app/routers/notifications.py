@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Notification, User
 from ..deps import get_current_user
+from ..services.phan_trang import co_phan_trang, trang_hoa
 
 router = APIRouter(prefix="/api/thong-bao", tags=["Thông báo"])
 
@@ -19,13 +20,19 @@ def out(n):
 
 @router.get("")
 def danh_sach(chua_doc: bool = False, loai: str = "", gioi_han: int = 100,
+              trang: int = 0, kich_thuoc_trang: int = 20,
               db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     q = db.query(Notification)
     if chua_doc:
         q = q.filter(Notification.is_read == False)  # noqa: E712
     if loai:
         q = q.filter(Notification.type == loai)
-    return [out(n) for n in q.order_by(Notification.id.desc()).limit(min(gioi_han, 500)).all()]
+    q = q.order_by(Notification.id.desc())
+    # Phân trang (mục 1 đợt 3): khi có trang, phân trang trên TOÀN BỘ kết quả lọc
+    # thay cho giới hạn gioi_han cũ; không truyền trang -> giữ hành vi cũ.
+    if co_phan_trang(trang):
+        return trang_hoa([out(n) for n in q.all()], trang, kich_thuoc_trang)
+    return [out(n) for n in q.limit(min(gioi_han, 500)).all()]
 
 
 @router.get("/dem-chua-doc")
