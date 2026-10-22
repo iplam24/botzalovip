@@ -14,6 +14,9 @@
 - Mục 9.5: khách là bạn bè Zalo đã phân bổ -> gắn admin phụ trách.
 - Gate theo Cài đặt: giờ hoạt động, từ khóa cấm, ngưỡng chuyển nhân viên,
   bật/tắt module (thu thập / tự động hóa / bộ nhớ / trả lời toàn cục).
+- Chế độ TRÒ CHUYỆN TỰ DO (che_do_tro_chuyen_tu_do): bỏ qua tri thức/dịch vụ/
+  bộ nhớ tư vấn, tắt hỏi SĐT + tắt thông báo lead; luật nhóm, từ khóa cấm,
+  chuyển nhân viên, thả tim, chia tin, định dạng Zalo vẫn áp dụng như thường.
 """
 import os
 import time
@@ -142,6 +145,9 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
                     nguoi_gui_id: str = "", cli_msg_id: str = ""):
     trace = str(uuid.uuid4())[:8]
     cai_dat = _doc_cai_dat(db)
+    # Chế độ trò chuyện tự do: bot nghỉ bán hàng — không hỏi SĐT, không báo
+    # lead (co_so_dien_thoai/du_thong_tin), không chèn tri thức/doanh nghiệp.
+    tu_do = bool(cai_dat.get("che_do_tro_chuyen_tu_do"))
     # Dedup trước khi tạo
     if external_id and db.query(Message).filter(Message.external_id == external_id).first():
         db.add(SystemLog(level="warning", module="orchestrator", message=f"Tin trùng bị bỏ qua {external_id}", trace_id=trace)); db.commit()
@@ -190,9 +196,10 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
         try:
             kq_thu_thap = extraction_service.extract_and_save(db, cust, msg)
             ten_khach = cust.display_name or cust.external_id
-            if kq_thu_thap.get("sdt_moi"):
+            # Đang chat giải trí (chế độ tự do) thì KHÔNG báo lead làm phiền admin
+            if kq_thu_thap.get("sdt_moi") and not tu_do:
                 _thong_bao(db, "co_so_dien_thoai", "Khách đã để lại số điện thoại", f"Khách {ten_khach} đã cung cấp số điện thoại {cust.phone}.", cust, conv, "thong_tin", channel)
-            if kq_thu_thap.get("du_thong_tin_moi"):
+            if kq_thu_thap.get("du_thong_tin_moi") and not tu_do:
                 _thong_bao(db, "du_thong_tin", "Đã thu thập đủ thông tin khách", f"Khách {ten_khach} đã có đủ thông tin cơ bản theo các trường bắt buộc đã cấu hình.", cust, conv, "thong_tin", channel)
         except Exception as e:
             db.add(SystemLog(level="warning", module="thu_thap", message=f"Lỗi trích xuất thông tin khách: {e}", trace_id=trace)); db.commit()
@@ -246,23 +253,41 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
             conv.human_takeover = True; db.commit(); return {"trung": False, "trace_id": trace, "tra_loi": None, "ly_do": "quy_tac_chuyen_nhan_vien", "conversation_id": conv.id, "customer_id": cust.id}
         if rule.action_type == "tam_dung_bot":
             conv.bot_enabled = False; db.commit(); return {"trung": False, "trace_id": trace, "tra_loi": None, "ly_do": "quy_tac_tam_dung_bot", "conversation_id": conv.id, "customer_id": cust.id}
-    chunks = knowledge_service.retrieve(db, content, limit=5)
-    # Dịch vụ liên quan: cộng điểm nếu tên dịch vụ xuất hiện
-    for s in db.query(ServiceItem).filter(ServiceItem.is_active == True).all():
-        if normalize_vi(s.name) in normalize_vi(content) and s.description:
-            chunks = [{"document_id": None, "title": s.name, "content": f"{s.name}: {s.description} Giá: {s.price_text or s.price}", "score": 99}] + chunks
-            break
+    # Chế độ tự do: KHÔNG truy xuất tri thức/dịch vụ/bộ nhớ tư vấn — chat thuần.
+    chunks = []
     memories = []
-    if cai_dat.get("module_bo_nho_ai", True) is not False:
-        memories = memory_service.retrieve_memories(db, cust.id, content, limit=3)
+    if not tu_do:
+        chunks = knowledge_service.retrieve(db, content, limit=5)
+        # Dịch vụ liên quan: cộng điểm nếu tên dịch vụ xuất hiện
+        for s in db.query(ServiceItem).filter(ServiceItem.is_active == True).all():
+            if normalize_vi(s.name) in normalize_vi(content) and s.description:
+                chunks = [{"document_id": None, "title": s.name, "content": f"{s.name}: {s.description} Giá: {s.price_text or s.price}", "score": 99}] + chunks
+                break
+        if cai_dat.get("module_bo_nho_ai", True) is not False:
+            memories = memory_service.retrieve_memories(db, cust.id, content, limit=3)
     # GĐ mở rộng 1 + registry: khách chưa có SĐT + intent/từ khóa cấu hình ->
     # hỏi xin SĐT, tối đa 1 lần cho mỗi hội thoại (tắt được bằng thu_thap_tu_hoi_sdt).
+    # Chế độ tự do: KHÔNG hỏi SĐT (đang chat bạn bè, hỏi số là phá vibe).
     intent_hoi = _tach_danh_sach(cai_dat.get("thu_thap_intent_hoi_sdt"))
     tu_khoa_hoi = _tach_danh_sach(cai_dat.get("thu_thap_tu_khoa_hoi_sdt"))
     kich_hoat_hoi = (not intent_hoi and not tu_khoa_hoi) or intent in intent_hoi or any(
         normalize_vi(tk) in chuoi_chuan for tk in tu_khoa_hoi)
     can_hoi_sdt = (not (cust.phone or "").strip()) and kich_hoat_hoi
-    hoi_sdt = (cai_dat.get("thu_thap_tu_hoi_sdt", True) is not False) and can_hoi_sdt and not _da_hoi_sdt(db, conv.id)
+    hoi_sdt = (not tu_do) and (cai_dat.get("thu_thap_tu_hoi_sdt", True) is not False) and can_hoi_sdt and not _da_hoi_sdt(db, conv.id)
+    # PR chủ động: danh sách dịch vụ đang mở bán để tiêm vào prompt tư vấn
+    # (chỉ chế độ tư vấn; giá 0 và không có giá chữ thì bỏ phần giá).
+    dich_vu_pr = []
+    if not tu_do and cai_dat.get("bot_chu_dong_pr", True) is not False:
+        try:
+            so_dv = int(cai_dat.get("so_dich_vu_pr") or 5)
+        except (TypeError, ValueError):
+            so_dv = 5
+        for s in (db.query(ServiceItem).filter(ServiceItem.is_active == True)
+                  .order_by(ServiceItem.id).limit(max(1, so_dv)).all()):
+            gia = (s.price_text or "").strip()
+            if not gia and s.price:
+                gia = f"{s.price:,.0f}".replace(",", ".") + "đ"
+            dich_vu_pr.append({"ten": s.name, "gia": gia, "mo_ta": (s.description or "")[:200]})
     provider = ai_gateway.get_default_provider(db)
     la_mock = (not provider) or provider.provider == "mock"
     # Mục 10: lịch sử hội thoại đa lượt (số tin theo Cài đặt so_tin_nhan_ngu_canh),
@@ -279,7 +304,8 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
     try:
         reply, model_used = ai_gateway.generate_reply(
             db, provider, content, chunks, memories,
-            goi_y_hoi_sdt=(hoi_sdt and not la_mock), lich_su=lich_su, cai_dat=cai_dat)
+            goi_y_hoi_sdt=(hoi_sdt and not la_mock), lich_su=lich_su, cai_dat=cai_dat,
+            dich_vu=dich_vu_pr, ho_so_khach=(cust.memory_summary or ""))
     except ai_gateway.AIError as e:
         db.add(SystemLog(level="error", module="orchestrator", message=f"Lỗi AI: {e}", trace_id=trace)); db.commit()
         _thong_bao(db, "bot_khong_tra_loi_duoc", "Bot không trả lời được", f"Bot không trả lời được khách {cust.display_name or cust.external_id} do lỗi nhà cung cấp AI: {e}", cust, conv, "canh_bao", channel)
@@ -298,8 +324,16 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
         if tin_chao:
             reply = tin_chao + "\n" + (reply or "")
     # Policy check đơn giản: không hứa hẹn ngoài dữ liệu - nếu không có nguồn và câu hỏi giá thì vẫn trả lời mẫu 'chưa đủ thông tin' từ mock
-    return _send_reply(db, conv, cust, reply, trace, chunks=chunks, model_used=model_used, intent=intent, channel=channel,
-                       cai_dat=cai_dat, tin_khach=_tin_khach(customer_external_id, external_id, cli_msg_id, la_nhom))
+    ket_qua_gui = _send_reply(db, conv, cust, reply, trace, chunks=chunks, model_used=model_used, intent=intent, channel=channel,
+                              cai_dat=cai_dat, tin_khach=_tin_khach(customer_external_id, external_id, cli_msg_id, la_nhom))
+    # Bộ nhớ dài hạn: đủ số tin mới thì tóm tắt gộp hồ sơ khách (chỉ chế độ tư
+    # vấn; hàm tự nuốt lỗi, không chặn pipeline).
+    if not tu_do:
+        try:
+            memory_service.cap_nhat_tom_tat_bo_nho(db, cust, cai_dat)
+        except Exception:
+            pass
+    return ket_qua_gui
 
 
 def _tin_khach(customer_external_id, external_id, cli_msg_id, la_nhom):

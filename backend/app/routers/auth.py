@@ -1,9 +1,10 @@
-"""Xác thực + quản lý người dùng (Đợt nâng cấp 2).
+"""Xác thực + quản lý người dùng.
 
-Đăng nhập NỘI BỘ chỉ bằng tên đăng nhập (username) — không kiểm tra mật khẩu
-nữa theo lựa chọn của chủ hệ thống (cột mật khẩu vẫn giữ trong DB để sau này
-bật lại được). Tài khoản bị khóa (is_active=False) không đăng nhập được và
-phiên cũ cũng bị chặn ở deps.get_current_user.
+Đăng nhập bằng USERNAME + MẬT KHẨU (đính chính của LAM 22/10: đợt nâng cấp 2
+đã hiểu nhầm thành bỏ mật khẩu — ý gốc là dùng username thay cho email, mật
+khẩu vẫn bắt buộc). Mật khẩu được kiểm tra bằng hash PBKDF2 (verify_password),
+không bao giờ trả ra ngoài. Tài khoản bị khóa (is_active=False) không đăng
+nhập được và phiên cũ cũng bị chặn ở deps.get_current_user.
 """
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import User, Customer, PhanBoBanBe
 from ..schemas import LoginIn, UserCreate, UserUpdate
-from ..security import hash_password, create_token
+from ..security import hash_password, verify_password, create_token
 from ..deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/auth", tags=["Xác thực"])
@@ -35,11 +36,15 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
     ten = (data.username or "").strip()
     if not ten:
         raise HTTPException(400, "Hãy nhập tên đăng nhập")
+    if not data.password:
+        raise HTTPException(400, "Hãy nhập mật khẩu")
     u = db.query(User).filter(func.lower(User.username) == ten.lower()).first()
     if not u:
         raise HTTPException(401, "Tên đăng nhập không đúng")
     if not u.is_active:
         raise HTTPException(403, "Tài khoản đã bị khóa, vui lòng liên hệ quản trị viên")
+    if not verify_password(data.password, u.hashed_password or ""):
+        raise HTTPException(401, "Mật khẩu không đúng")
     u.last_login_at = datetime.now(timezone.utc)
     db.commit()
     return {"access_token": create_token(u.id, u.email, u.role), "token_type": "bearer",
@@ -60,8 +65,10 @@ def create_user(data: UserCreate, db: Session = Depends(get_db), admin: User = D
         raise HTTPException(400, "Tên đăng nhập đã tồn tại")
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(400, "Email đã tồn tại")
+    if not (data.password or "").strip():
+        raise HTTPException(400, "Hãy đặt mật khẩu cho người dùng mới")
     u = User(email=email, username=username,
-             hashed_password=hash_password(data.password or "khong-dung-mat-khau-nay"),
+             hashed_password=hash_password(data.password),
              full_name=data.full_name, role=data.role)
     db.add(u); db.commit(); db.refresh(u)
     return user_out(db, u)
@@ -92,5 +99,8 @@ def update_user(uid: int, data: UserUpdate, db: Session = Depends(get_db), admin
     for k in ("full_name", "role", "is_active"):
         if k in du_lieu and du_lieu[k] is not None:
             setattr(u, k, du_lieu[k])
+    # Đổi mật khẩu: chỉ khi gửi mật khẩu mới khác trống — lưu dạng hash, không trả ra
+    if du_lieu.get("password"):
+        u.hashed_password = hash_password(du_lieu["password"])
     db.commit(); db.refresh(u)
     return user_out(db, u)

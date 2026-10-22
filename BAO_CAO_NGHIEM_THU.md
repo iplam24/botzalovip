@@ -213,3 +213,46 @@ Tổng kiểm thử sau đợt này: **55 passed** (40 cũ giữ nguyên + 15 m�
 - Chế độ "duyệt trước khi gửi": tin bot được lưu trạng thái chờ duyệt và KHÔNG gửi; chưa có giao diện duyệt/gửi lại (nút gửi tay trong trang Hội thoại vẫn dùng được như đường gửi thay thế).
 - Responsive đã rà bằng lớp chuẩn + build, chưa chụp ảnh kiểm chứng trực tiếp ở 3 mốc màn hình.
 - Chưa deploy lên server, chưa commit git (main agent thực hiện theo phân công).
+
+## Cập nhật bổ sung (22/10/2026) — Chế độ trò chuyện tự do + ĐÍNH CHÍNH đăng nhập username & mật khẩu + Nút Lưu nổi bật + PR chủ động & Bộ nhớ dài hạn
+
+Tổng kiểm thử sau đợt bổ sung này: **62 passed** (55 cũ giữ nguyên + 7 mới test_56 → test_62). Registry cài đặt nay có **59 khóa / 8 nhóm**. Frontend `npm run build` thành công (chunk chính ~166 kB).
+
+### A. ĐÍNH CHÍNH đăng nhập: USERNAME + MẬT KHẨU (thay thế mục 1 của Đợt nâng cấp 2 ở trên)
+- Mục 1 của Đợt nâng cấp 2 ("đăng nhập CHỈ bằng username, bỏ mật khẩu") là HIỂU NHẦM yêu cầu và đã bị thay thế hoàn toàn theo đính chính của LAM: ý gốc là dùng username thay cho email, mật khẩu vẫn bắt buộc.
+- `POST /api/auth/login` nay nhận `{username, password}`: tra user theo username (không phân biệt hoa thường) → tài khoản bị khóa 403 → kiểm tra mật khẩu bằng `verify_password` (PBKDF2 như cũ): sai mật khẩu → 401 "Mật khẩu không đúng", user không tồn tại → 401, thiếu trường → 422. Đúng mật khẩu vẫn ghi `last_login_at` và trả token như trước. Tài khoản admin giữ nguyên: username `admin` + mật khẩu theo `ADMIN_PASSWORD` (seed không đổi; hash đang lưu trên server là của chính mật khẩu đó nên đăng nhập lại bình thường sau khi triển khai bản này).
+- Trang đăng nhập: 2 ô "Tên đăng nhập" + "Mật khẩu" (type password), bỏ ghi chú "chỉ cần username". Trang Người dùng: tạo mới BẮT BUỘC đặt mật khẩu (API trả 400 nếu trống); thêm form Sửa người dùng có ô "Mật khẩu mới (để trống = giữ nguyên)" — mật khẩu mới được hash khi lưu, không bao giờ xuất hiện trong phản hồi API.
+- Test_41 đã viết lại toàn bộ cho hành vi mới: đúng pass 200, sai pass 401, thiếu pass 422, bị khóa + đúng pass 403, đổi mật khẩu qua API → mật khẩu mới đăng nhập được, mật khẩu cũ bị từ chối, sửa không gửi mật khẩu thì giữ nguyên.
+
+### B. Nút LƯU nổi bật, khó quên
+- **Trang Cài đặt:** theo dõi trạng thái "bẩn" theo từng khóa (so giá trị đang sửa với bản đã lưu gần nhất). Ngay khi có bất kỳ thay đổi chưa lưu nào, một thanh dính (fixed) nổi lên ở đáy màn hình: nền màu chủ đạo, chữ "Có N thay đổi chưa lưu ở M nhóm — chưa lưu là chưa có hiệu lực đâu nhé" + nút **"Lưu thay đổi"** lớn, trắng, in đậm, có icon Font Awesome — bấm là lưu TẤT CẢ nhóm đang bẩn một lần. Lưu xong thanh chuyển xanh lá "Đã lưu ✓ lúc HH:MM" vài giây rồi tự ẩn. Nút lưu theo từng nhóm vẫn giữ nguyên.
+- **Mọi form trong HopBieuMau (modal dùng chung):** modal đổi cấu trúc — tiêu đề cố định, thân cuộn riêng; hàng nút cuối của form (Lưu/Hủy) được CSS ghim dính ở đáy vùng cuộn nên form dài đến đâu nút Lưu vẫn luôn nhìn thấy, áp dụng tự động cho mọi trang đang dùng component này.
+- Kiểm chứng: build frontend pass + rà soát code (không có test tự động cho dirty-state của giao diện; hành vi lưu vẫn được bao phủ bởi test API cài đặt phía backend).
+
+### C. Chế độ TRÒ CHUYỆN TỰ DO — bot nghỉ bán hàng, chat như bạn bè
+- 3 khóa mới trong registry, nhóm riêng "Chế độ trò chuyện tự do" (icon fa-face-laugh-wink): `che_do_tro_chuyen_tu_do` (bool, mặc định TẮT), `prompt_tro_chuyen_tu_do` (textarea — persona mặc định viết sẵn: bạn bè thân thiết, nói chuyện tự nhiên kiểu Gen Z, xưng hô linh hoạt theo đối phương, cà khịa thông minh, được phép tiếng lóng/chửi thề qua lại kiểu bạn bè khi đối phương đùa theo hướng đó, không tự nhận là AI/trợ lý, không lôi sản phẩm/giá cả vào trừ khi đối phương tự hỏi mua bán, trả lời ngắn kiểu chat; admin sửa được toàn văn trên UI), `nhiet_do_tu_do` (số 0–2, mặc định 1.1).
+- Khi BẬT (ở `ai_gateway.generate_reply` + orchestrator): system prompt CHỈ gồm persona tự do — không chèn ngữ cảnh kho tri thức, không thông tin doanh nghiệp, không danh sách dịch vụ PR, không hồ sơ bán hàng, không luật tư vấn, không gợi ý hỏi SĐT; temperature dùng `nhiet_do_tu_do`. Vẫn truyền lịch sử hội thoại đa lượt, vẫn qua chuẩn hoá định dạng Zalo + chia tin + thả tim theo cài đặt, vẫn tôn trọng luật nhóm (chỉ rep khi được tag đích danh), từ khóa cấm và chuyển nhân viên ở mức hệ thống, quy tắc tự động hóa có câu trả lời cố định vẫn chạy (do admin chủ động cấu hình).
+- Thông báo lead: khi đang bật, KHÔNG tạo thông báo `co_so_dien_thoai` và `du_thong_tin`, KHÔNG hỏi xin SĐT (kể cả đường Mock nối câu hỏi); việc trích xuất thông tin vẫn chạy lặng lẽ để không mất dữ liệu. Tắt chế độ là mọi hành vi tư vấn/lead quay lại như cũ.
+- Giao diện: công tắc + persona trong nhóm cài đặt riêng kèm mô tả rõ; nút gạt nhanh ngay trên trang Tổng quan; khi đang bật, header mọi trang hiện huy hiệu màu hổ phách "Đang ở chế độ trò chuyện tự do" (bấm vào để tới Cài đặt), kiểm tra lại mỗi 30 giây cùng nhịp chuông thông báo.
+- Với nhà cung cấp Mock (mô phỏng), bot cũng đáp theo biến thể bạn bè luân phiên thay cho mẫu tư vấn — chỉ để demo, trải nghiệm đầy đủ cần nhà cung cấp AI thật.
+- Test_56 registry nhóm tự do + ràng buộc nhiệt độ; test_57 payload khi bật (có prompt tự do, KHÔNG có tri thức/luật tư vấn/hồ sơ, temperature = 1.3, không gợi ý SĐT, vẫn có lịch sử) và khi tắt (hành vi cũ nguyên vẹn); test_58 tắt thông báo lead nhưng vẫn thu thập SĐT lặng lẽ; test_59 Mock không hỏi SĐT khi tự do, hỏi lại khi tắt chế độ.
+
+### D. PR chủ động + tiêm dịch vụ vào prompt (chế độ tư vấn)
+- Mỗi lượt trả lời tư vấn, hệ thống tiêm vào system prompt danh sách dịch vụ đang `is_active` (tối đa `so_dich_vu_pr`, mặc định 5, theo thứ tự tạo): tên + giá (giá chữ nếu có, không thì định dạng VNĐ từ giá số; giá 0 thì bỏ phần giá) + mô tả rút gọn 200 ký tự.
+- Luật PR ghi thẳng trong prompt: khách chào hỏi/mơ hồ/chưa rõ nhu cầu → giới thiệu NGẮN GỌN 1–2 dịch vụ nổi bật và gợi mở theo nhu cầu, TUYỆT ĐỐI tránh câu hỏi trống kiểu "anh/chị đang cần hỗ trợ về sản phẩm hay dịch vụ nào ạ?"; đã có ngữ cảnh → tư vấn bám sát + gợi ý dịch vụ liên quan tự nhiên; không PR dồn dập mọi lượt.
+- Cài đặt: `bot_chu_dong_pr` (bool, mặc định bật), `so_dich_vu_pr` (số 1–20). Test_60 kiểm chứng payload có dịch vụ + giá định dạng "150.000đ" + luật PR, và tắt cài đặt thì không tiêm nữa.
+- Lưu ý trung thực: bot chỉ PR hay khi dữ liệu dịch vụ/kho tri thức được nhập tử tế — chẩn đoán trên server cho thấy dữ liệu thật còn rất trống (1 dịch vụ giá 0 không mô tả, kho tri thức 1 đoạn), đó là giới hạn dữ liệu, không phải giới hạn cơ chế.
+
+### E. Bộ nhớ dài hạn theo khách — "nhớ cực lâu"
+- `customers` thêm cột `memory_summary` (TEXT; migration nhẹ trong seed theo đúng mẫu an toàn Postgres — TEXT/VARCHAR thường, không DATETIME).
+- `memory_service.cap_nhat_tom_tat_bo_nho`: sau mỗi `bo_nho_tom_tat_sau_bao_nhieu_tin` tin nhắn của khách (cài đặt mới, mặc định 6; mốc đã tóm tắt lưu bằng SystemLog module `bo_nho` kèm ID tin nhắn cuối đã gộp) → tóm tắt gộp hồ sơ cũ + tin mới thành hồ sơ ngắn (định danh/tên, nhu cầu & sở thích, đã hỏi/mua gì, điểm cần lưu ý, việc đang dang dở). Provider thật: gọi AI tóm tắt (temperature 0.3, có ghi AIUsage), lỗi AI thì bỏ qua lần đó, không chặn pipeline, mốc giữ nguyên để lần sau thử lại. Provider Mock: tóm tắt bằng quy tắc từ thông tin đã thu thập + vài tin gần nhất (không để trống khi kiểm thử).
+- Tiêm vào MỌI lượt trả lời tư vấn: mục "HỒ SƠ KHÁCH (bot nhớ lâu dài)" kèm luật dùng tự nhiên (gọi đúng tên khách nếu biết, nhắc nhu cầu cũ khi liên quan, không đọc thuộc lòng hồ sơ), cùng với các ký ức liên quan như trước.
+- API: `GET /api/khach-hang/{id}` và danh sách đều trả thêm `memory_summary`; `POST /api/khach-hang/{id}/tom-tat-bo-nho` tóm tắt lại ngay (kể cả chưa đủ tin); `PUT /api/khach-hang/{id}` cho phép admin sửa `memory_summary`.
+- UI: trong chi tiết khách (modal Thông tin thu thập) có thẻ "Bot nhớ về khách này" hiển thị hồ sơ + nút "Tóm tắt lại ngay" + "Sửa tay" với nút Lưu chính rõ ràng.
+- Test_61: ngưỡng 3 tin → hồ sơ tự hình thành (đường Mock) và chứa nội dung đã trao đổi; mới 1 tin thêm thì KHÔNG tóm tắt lại quá sớm; payload lượt sau chứa mục HỒ SƠ KHÁCH + nội dung hồ sơ. Test_62: tóm tắt tay qua API + sửa tay lưu được.
+- Chế độ trò chuyện tự do KHÔNG tiêm PR/dịch vụ/hồ sơ bán hàng và không tự tóm tắt hồ sơ bán hàng (chỉ giữ trí nhớ hội thoại ngắn trong phiên như thiết kế tự do đã chốt).
+
+### Chưa làm / giới hạn trung thực của đợt bổ sung này
+- Chưa deploy lên server, chưa commit git (main agent thực hiện theo phân công) — sau khi deploy, đăng nhập admin dùng username `admin` + mật khẩu đã cấp trước đây (không phải chỉ gõ username như bản đợt 2 đã live tạm thời).
+- Dirty-state của trang Cài đặt và chân modal dính được kiểm chứng bằng build + đọc code, chưa có test giao diện tự động (chụp ảnh/e2e).
+- Tóm tắt bộ nhớ bằng AI thật chưa chạy thử với provider thật trong pytest (đường đi đã test bằng Mock + bắt payload; lỗi AI được xử lý bỏ qua an toàn).

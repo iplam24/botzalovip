@@ -18,6 +18,92 @@ const NHAN_TRUONG_THU_THAP: Record<string, string> = {
   ghi_chu: "Ghi chú",
 };
 
+// Thẻ "Bot nhớ về khách này": hồ sơ tóm tắt dài hạn (memory_summary) do bot
+// tự tóm tắt gộp sau mỗi vài tin nhắn. Admin xem, sửa tay và tóm tắt lại ngay.
+function TheBoNhoKhach({ khach }: { khach: any }) {
+  const [tomTat, setTomTat] = useState(khach.memory_summary || "");
+  const [dangSua, setDangSua] = useState(false);
+  const [banNhap, setBanNhap] = useState("");
+  const [dangXuLy, setDangXuLy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    let dung = false;
+    api(`/api/khach-hang/${khach.id}`)
+      .then((d) => { if (!dung) setTomTat(d.memory_summary || ""); })
+      .catch(() => {});
+    return () => { dung = true; };
+  }, [khach.id]);
+
+  const tomTatLai = async () => {
+    setDangXuLy(true);
+    setMsg("");
+    try {
+      const r = await api(`/api/khach-hang/${khach.id}/tom-tat-bo-nho`, { method: "POST" });
+      setTomTat(r.memory_summary || "");
+      setMsg(r.thong_bao || "Đã tóm tắt lại.");
+    } catch (e: any) {
+      setMsg(e.message);
+    } finally {
+      setDangXuLy(false);
+    }
+  };
+
+  const luuSuaTay = async () => {
+    setDangXuLy(true);
+    setMsg("");
+    try {
+      const r = await api(`/api/khach-hang/${khach.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ memory_summary: banNhap }),
+      });
+      setTomTat(r.memory_summary || "");
+      setDangSua(false);
+      setMsg("Đã lưu hồ sơ sửa tay.");
+    } catch (e: any) {
+      setMsg(e.message);
+    } finally {
+      setDangXuLy(false);
+    }
+  };
+
+  return (
+    <div className="border border-thuongHieu-200 bg-thuongHieu-50/60 dark:bg-neutral-800 rounded-xl p-4 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <h4 className="font-semibold flex items-center gap-2">
+          <i className="fa-solid fa-brain text-thuongHieu-600" /> Bot nhớ về khách này
+        </h4>
+        <span className="flex-1" />
+        <Nut mau="xam" onClick={tomTatLai} disabled={dangXuLy}>
+          <i className="fa-solid fa-arrows-rotate mr-1.5" />{dangXuLy ? "Đang xử lý..." : "Tóm tắt lại ngay"}
+        </Nut>
+        {!dangSua && (
+          <Nut mau="xam" onClick={() => { setBanNhap(tomTat); setDangSua(true); }}>
+            <i className="fa-solid fa-pen mr-1.5" />Sửa tay
+          </Nut>
+        )}
+      </div>
+      {dangSua ? (
+        <div>
+          <textarea className={oNhap} rows={4} value={banNhap} onChange={(e) => setBanNhap(e.target.value)}
+            placeholder="Hồ sơ bot nhớ về khách: nhu cầu, sở thích, điểm cần lưu ý, việc đang dang dở..." />
+          <div className="flex justify-end gap-2 mt-2">
+            <Nut mau="xam" onClick={() => setDangSua(false)}>Hủy bỏ</Nut>
+            <Nut onClick={luuSuaTay} disabled={dangXuLy}>
+              <i className="fa-solid fa-floppy-disk mr-1.5" />{dangXuLy ? "Đang lưu..." : "Lưu hồ sơ"}
+            </Nut>
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+          {tomTat || <span className="text-gray-500">Bot chưa có hồ sơ tóm tắt về khách này. Hồ sơ sẽ tự hình thành sau vài tin nhắn trò chuyện, hoặc bấm “Tóm tắt lại ngay”.</span>}
+        </p>
+      )}
+      {msg && <p className="text-xs text-gray-500 mt-2">{msg}</p>}
+    </div>
+  );
+}
+
 // Panel thông tin thu thập của 1 khách: bot tự bóc tách từ hội thoại,
 // nhân viên xem/sửa/xác minh/thêm tay/xóa được.
 function BangThongTinThuThap({ khach, baoLoi }: { khach: any; baoLoi: (text: string) => void }) {
@@ -371,10 +457,13 @@ export default function KhachHang() {
         rong="max-w-3xl"
       >
         {khachThuThap && (
-          <BangThongTinThuThap
-            khach={khachThuThap}
-            baoLoi={(text) => setThongBao({ loai: "loi", text })}
-          />
+          <>
+            <TheBoNhoKhach khach={khachThuThap} />
+            <BangThongTinThuThap
+              khach={khachThuThap}
+              baoLoi={(text) => setThongBao({ loai: "loi", text })}
+            />
+          </>
         )}
       </HopBieuMau>
 

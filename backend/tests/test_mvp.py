@@ -17,8 +17,8 @@ seed()
 client = TestClient(app)
 
 def auth():
-    # Đợt nâng cấp 2: đăng nhập CHỈ bằng username (không mật khẩu)
-    r = client.post("/api/auth/login", json={"username": "admin"})
+    # Đính chính: đăng nhập bằng username + mật khẩu (admin / mật khẩu seed mặc định)
+    r = client.post("/api/auth/login", json={"username": "admin", "password": "Admin@12345"})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 H = None
@@ -140,7 +140,7 @@ def test_15_sao_luu_khoi_phuc():
 def test_16_phan_quyen():
     client.post("/api/auth/nguoi-dung", json={"email": "nv@test.local", "password": "Nv@12345", "role": "NhanVien"}, headers=headers())
     # Username tự suy từ email khi tạo mà không truyền username -> "nv@test.local"
-    login = client.post("/api/auth/login", json={"username": "nv@test.local"})
+    login = client.post("/api/auth/login", json={"username": "nv@test.local", "password": "Nv@12345"})
     assert login.status_code == 200, login.text
     nh = {"Authorization": f"Bearer {login.json()['access_token']}"}
     lst = client.get("/api/ai-providers", headers=nh); assert "sk-secret" not in lst.text

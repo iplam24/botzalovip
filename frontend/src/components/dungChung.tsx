@@ -125,14 +125,19 @@ export function HopBieuMau({ mo, tieuDe, onDong, children, rong = "max-w-lg" }: 
   mo: boolean; tieuDe: string; onDong: () => void; children: ReactNode; rong?: string;
 }) {
   if (!mo) return null;
+  // Cấu trúc: tiêu đề CỐ ĐỊNH trên cùng, thân cuộn được; hàng nút cuối của
+  // form (Lưu/Hủy) được CSS .than-modal ghim dính ở đáy vùng cuộn — form dài
+  // đến đâu nút Lưu vẫn luôn nhìn thấy (yêu cầu nút Lưu nổi bật, khó quên).
   return (
     <div className="fixed inset-0 bg-black/40 flex items-start justify-center z-50 p-4 overflow-y-auto" onClick={onDong}>
-      <div className={`bg-white dark:bg-neutral-900 rounded shadow-xl w-full ${rong} p-5 my-8`} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
+      <div className={`bg-white dark:bg-neutral-900 rounded shadow-xl w-full ${rong} my-8 max-h-[92vh] flex flex-col overflow-hidden`} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b flex-none">
           <h3 className="font-bold text-lg">{tieuDe}</h3>
           <button onClick={onDong} className="text-gray-500 hover:text-gray-800 text-xl leading-none" aria-label="Đóng">×</button>
         </div>
-        {children}
+        <div className="px-5 pt-4 pb-5 overflow-y-auto than-modal">
+          {children}
+        </div>
       </div>
     </div>
   );

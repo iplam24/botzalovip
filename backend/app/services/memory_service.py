@@ -1,6 +1,13 @@
-"""Bộ nhớ dài hạn: lưu, chống trùng, truy xuất theo khách hàng và từ khóa."""
+"""Bộ nhớ dài hạn: lưu, chống trùng, truy xuất theo khách hàng và từ khóa.
+
+Bổ sung: HỒ SƠ TÓM TẮT DÀI HẠN theo khách (customers.memory_summary) — sau mỗi
+N tin nhắn của khách (cài đặt bo_nho_tom_tat_sau_bao_nhieu_tin, mặc định 6),
+hệ thống tóm tắt gộp (hồ sơ cũ + tin mới) thành một hồ sơ ngắn và tiêm vào
+mọi lượt trả lời tư vấn để bot "nhớ" khách. Mốc đã tóm tắt tới đâu được lưu
+bằng SystemLog module "bo_nho" dạng "tom_tat cust=<id> msg=<message_id>".
+"""
 from sqlalchemy.orm import Session
-from ..models import MemoryItem
+from ..models import MemoryItem, Message, SystemLog, CollectedInfo, Conversation
 from .text_utils import normalize_vi
 
 def remember(db: Session, customer_id, content, memory_type="ngu_nghia", source="he_thong", confidence=0.8):
@@ -18,3 +25,143 @@ def retrieve_memories(db: Session, customer_id, query="", limit=5):
     if query:
         nq = normalize_vi(query); items = sorted(items, key=lambda m: -sum(1 for w in nq.split() if w in normalize_vi(m.content)))
     return items[:limit]
+
+
+# ---- Hồ sơ tóm tắt dài hạn theo khách ----
+def _moc_da_tom_tat(db: Session, customer_id) -> int:
+    """ID tin nhắn khách gần nhất đã được gộp vào hồ sơ tóm tắt (0 nếu chưa)."""
+    dong = (db.query(SystemLog)
+            .filter(SystemLog.module == "bo_nho",
+                    SystemLog.message.like(f"tom_tat cust={customer_id} msg=%"))
+            .order_by(SystemLog.id.desc()).first())
+    if not dong:
+        return 0
+    try:
+        return int(str(dong.message).rsplit("msg=", 1)[1])
+    except Exception:
+        return 0
+
+
+def _tom_tat_quy_tac(db: Session, customer, tin_moi) -> str:
+    """Tóm tắt bằng quy tắc (dùng khi provider là Mock/mô phỏng): dựng hồ sơ từ
+    thông tin đã thu thập + hồ sơ khách + vài tin gần nhất — không để trống."""
+    cac_phan = []
+    if (customer.display_name or "").strip():
+        cac_phan.append(f"Khách {customer.display_name.strip()}")
+    if (customer.phone or "").strip():
+        cac_phan.append(f"SĐT {customer.phone.strip()}")
+    thu_thap = {}
+    for t in (db.query(CollectedInfo)
+              .filter(CollectedInfo.customer_id == customer.id)
+              .order_by(CollectedInfo.id.desc()).all()):
+        thu_thap.setdefault(t.field, t.value)
+    nhan_truong = {"nhu_cau": "Nhu cầu", "dich_vu_quan_tam": "Quan tâm",
+                   "ngan_sach": "Ngân sách", "thoi_gian_mong_muon": "Thời gian mong muốn",
+                   "dia_chi": "Địa chỉ/khu vực", "email": "Email"}
+    for truong, nhan in nhan_truong.items():
+        if thu_thap.get(truong):
+            cac_phan.append(f"{nhan}: {thu_thap[truong]}")
+    if tin_moi:
+        cac_phan.append("Gần đây khách trao đổi: " + "; ".join(
+            f'"{(m.content or "")[:60]}"' for m in tin_moi[-3:]))
+    if not cac_phan:
+        return ""
+    return ". ".join(cac_phan) + "."
+
+
+def _tom_tat_bang_ai(db: Session, provider, customer, tom_tat_cu: str, tin_moi) -> str:
+    """Gọi provider AI thật để tóm tắt gộp hồ sơ cũ + tin mới. Lỗi thì ném ra
+    để hàm gọi quyết định bỏ qua (không chặn pipeline trả lời khách)."""
+    from . import ai_gateway
+    from ..security import decrypt_secret
+    from ..models import AIUsage
+    key = decrypt_secret(provider.api_key_encrypted)
+    if not key or not provider.base_url:
+        raise ai_gateway.AIError("Chưa cấu hình khóa API/địa chỉ API để tóm tắt bộ nhớ")
+    transcript = "\n".join(f"Khách: {m.content}" for m in tin_moi if m.content)
+    noi_dung = (
+        f"Hồ sơ tóm tắt hiện tại:\n{tom_tat_cu or '(chưa có)'}\n\n"
+        f"Tin nhắn mới của khách:\n{transcript}\n\n"
+        "Hãy viết HỒ SƠ TÓM TẮT MỚI (gộp hồ sơ cũ với tin mới, bỏ trùng lặp), tối đa khoảng 120 từ, gồm: "
+        "định danh/tên nếu biết, nhu cầu và sở thích, đã hỏi/mua những gì, điểm cần lưu ý, việc đang dang dở. "
+        "Chỉ viết đúng hồ sơ, không giải thích, không chào hỏi."
+    )
+    payload = {"model": provider.model, "stream": False, "temperature": 0.3, "max_tokens": 500,
+               "messages": [
+                   {"role": "system", "content": "Bạn là hệ thống ghi nhớ khách hàng. Viết hồ sơ tóm tắt ngắn gọn, chính xác, chỉ dựa trên dữ kiện được cung cấp, tuyệt đối không bịa thêm."},
+                   {"role": "user", "content": noi_dung}]}
+    with ai_gateway.http_client(timeout=provider.timeout or 30) as client:
+        r = client.post(f"{provider.base_url.rstrip('/')}/chat/completions",
+                        headers={"Authorization": f"Bearer {key}"}, json=payload)
+        if r.status_code >= 400:
+            raise ai_gateway.AIError(f"Provider trả lỗi {r.status_code} khi tóm tắt bộ nhớ")
+        parsed = ai_gateway.parse_chat_response(r.text, r.headers.get("content-type", ""))
+    text = (parsed.get("content") or "").strip()
+    if not text:
+        raise ai_gateway.AIError("Provider trả nội dung rỗng khi tóm tắt bộ nhớ")
+    usage = parsed.get("usage") or {}
+    db.add(AIUsage(provider_id=provider.id, model=parsed.get("model") or provider.model,
+                   prompt_tokens=usage.get("prompt_tokens", 0) or 0,
+                   completion_tokens=usage.get("completion_tokens", 0) or 0, status="thanh_cong"))
+    db.commit()
+    return text
+
+
+def cap_nhat_tom_tat_bo_nho(db: Session, customer, cai_dat: dict = None, force: bool = False):
+    """Tóm tắt gộp hồ sơ dài hạn cho khách khi đủ số tin mới (hoặc force=True).
+
+    Trả về hồ sơ mới nếu đã tóm tắt, None nếu chưa đủ tin / lỗi AI (bỏ qua,
+    mốc không đổi nên lần xử lý sau đủ tin sẽ thử lại). KHÔNG ném lỗi ra ngoài.
+    """
+    try:
+        cd = cai_dat
+        if cd is None:
+            from ..routers.cai_dat import doc_cai_dat
+            cd = doc_cai_dat(db)
+        try:
+            nguong = int(cd.get("bo_nho_tom_tat_sau_bao_nhieu_tin") or 6)
+        except (TypeError, ValueError):
+            nguong = 6
+        moc = _moc_da_tom_tat(db, customer.id)
+        conv_ids = [c.id for c in db.query(Conversation).filter(Conversation.customer_id == customer.id).all()]
+        if not conv_ids:
+            return None
+        tin_moi = (db.query(Message)
+                   .filter(Message.conversation_id.in_(conv_ids),
+                           Message.sender_type == "khach", Message.id > moc)
+                   .order_by(Message.id).all())
+        if force and not tin_moi:
+            # Tóm tắt tay khi chưa có tin mới: dùng 10 tin khách gần nhất làm ngữ cảnh
+            tin_moi = (db.query(Message)
+                       .filter(Message.conversation_id.in_(conv_ids), Message.sender_type == "khach")
+                       .order_by(Message.id.desc()).limit(10).all())
+            tin_moi = list(reversed(tin_moi))
+        if not tin_moi:
+            return None
+        if not force and len(tin_moi) < max(1, nguong):
+            return None
+        from . import ai_gateway
+        provider = ai_gateway.get_default_provider(db)
+        if provider and provider.provider != "mock":
+            try:
+                tom_tat = _tom_tat_bang_ai(db, provider, customer, customer.memory_summary or "", tin_moi)
+            except Exception as e:
+                db.add(SystemLog(level="warning", module="bo_nho",
+                                 message=f"Tóm tắt bộ nhớ bằng AI thất bại cho khách {customer.id}: {e}"))
+                db.commit()
+                return None
+        else:
+            tom_tat = _tom_tat_quy_tac(db, customer, tin_moi)
+        if not tom_tat:
+            return None
+        customer.memory_summary = tom_tat
+        db.add(SystemLog(level="info", module="bo_nho",
+                         message=f"tom_tat cust={customer.id} msg={tin_moi[-1].id}"))
+        db.commit()
+        return tom_tat
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None

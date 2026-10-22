@@ -2,10 +2,11 @@ import { FormEvent, useState } from "react";
 import { dangNhap } from "../lib/api";
 import { oNhap, Truong } from "../components/dungChung";
 
-// Trang đăng nhập quản trị — Đợt nâng cấp 2: đăng nhập nội bộ CHỈ bằng tên
-// đăng nhập (username), không dùng mật khẩu theo lựa chọn của chủ hệ thống.
+// Trang đăng nhập quản trị — username + mật khẩu (username thay cho email,
+// mật khẩu vẫn bắt buộc và được kiểm tra ở backend).
 export default function DangNhap({ onOk }: { onOk: () => void }) {
   const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
   const [loi, setLoi] = useState("");
   const [dangGui, setDangGui] = useState(false);
 
@@ -14,7 +15,7 @@ export default function DangNhap({ onOk }: { onOk: () => void }) {
     setDangGui(true);
     setLoi("");
     try {
-      await dangNhap(username.trim());
+      await dangNhap(username.trim(), password);
       onOk();
     } catch (e: any) {
       setLoi(e.message || "Đăng nhập thất bại, hoặc máy chủ chưa chạy.");
@@ -49,18 +50,23 @@ export default function DangNhap({ onOk }: { onOk: () => void }) {
             placeholder="Ví dụ: admin"
           />
         </Truong>
+        <Truong nhan="Mật khẩu" batBuoc>
+          <input
+            className={oNhap}
+            type="password"
+            value={password}
+            onChange={(x) => setPassword(x.target.value)}
+            required
+            autoComplete="current-password"
+            placeholder="Nhập mật khẩu"
+          />
+        </Truong>
         <button
           className="bg-thuongHieu-600 hover:bg-thuongHieu-700 text-white w-full py-2.5 rounded-lg font-medium disabled:opacity-50 transition-colors duration-160"
           disabled={dangGui}
         >
           {dangGui ? "Đang đăng nhập..." : (<><i className="fa-solid fa-right-to-bracket mr-2" />Đăng nhập</>)}
         </button>
-        <p className="text-xs text-gray-400 mt-4 leading-relaxed">
-          <i className="fa-solid fa-circle-info mr-1" />
-          Đây là đăng nhập nội bộ đơn giản chỉ bằng tên đăng nhập (không mật khẩu) — theo lựa chọn
-          của chủ hệ thống cho môi trường vận hành nội bộ. Đừng để lộ địa chỉ quản trị ra ngoài
-          nếu chưa có lớp bảo vệ bổ sung (VPN / danh sách IP cho phép).
-        </p>
       </form>
     </div>
   );

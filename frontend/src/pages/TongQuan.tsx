@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, dinhDangSo } from "../lib/api";
-import { DangTai, HuyHieuTrangThai, LoiTai, Nut, TieuDeTrang } from "../components/dungChung";
+import { DangTai, HuyHieuTrangThai, LoiTai, Nut, NutGat, TieuDeTrang } from "../components/dungChung";
 
 // Trang Tổng quan: số liệu thật từ /api/tong-quan và /api/phan-tich,
 // trạng thái nhà cung cấp AI mặc định + các tài khoản Zalo đã cấu hình.
@@ -9,6 +9,8 @@ export default function TongQuan({ diToi }: { diToi?: (tenTrang: string) => void
   const [phanTich, setPhanTich] = useState<any>(null);
   const [loi, setLoi] = useState("");
   const [dangTai, setDangTai] = useState(true);
+  const [tuDo, setTuDo] = useState(false);
+  const [dangDoiTuDo, setDangDoiTuDo] = useState(false);
 
   const tai = useCallback(async () => {
     setDangTai(true);
@@ -23,6 +25,25 @@ export default function TongQuan({ diToi }: { diToi?: (tenTrang: string) => void
       setDangTai(false);
     }
   }, []);
+
+  // Công tắc nhanh chế độ trò chuyện tự do (đồng bộ với Cài đặt hệ thống)
+  useEffect(() => {
+    api("/api/cai-dat")
+      .then((cd) => setTuDo(!!cd.che_do_tro_chuyen_tu_do))
+      .catch(() => {});
+  }, []);
+
+  const doiTuDo = async (bat: boolean) => {
+    setDangDoiTuDo(true);
+    try {
+      await api("/api/cai-dat", { method: "PUT", body: JSON.stringify({ che_do_tro_chuyen_tu_do: bat }) });
+      setTuDo(bat);
+    } catch {
+      /* lỗi quyền/kết nối: giữ nguyên trạng thái cũ */
+    } finally {
+      setDangDoiTuDo(false);
+    }
+  };
 
   useEffect(() => { tai(); }, [tai]);
 
@@ -59,6 +80,22 @@ export default function TongQuan({ diToi }: { diToi?: (tenTrang: string) => void
         {the("Lượt gọi AI", dinhDangSo(tongQuan?.tong_luot_goi_ai),
           `${dinhDangSo(tongQuan?.loi_goi_ai)} lượt lỗi · Chi phí ước tính: ${dinhDangSo(Math.round(tongQuan?.chi_phi_ai_uoc_tinh || 0))}`)}
       </div>
+
+      <section className={`mt-6 p-5 rounded shadow border-2 ${tuDo ? "bg-amber-50 border-amber-300 dark:bg-neutral-900" : "bg-white dark:bg-neutral-900 border-transparent"}`}>
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="font-bold flex items-center gap-2">
+            <i className="fa-solid fa-face-laugh-wink text-amber-500" />
+            Chế độ trò chuyện tự do
+          </h2>
+          <span className="flex-1" />
+          <NutGat bat={tuDo} onDoi={doiTuDo} disabled={dangDoiTuDo} nhan={tuDo ? "Đang BẬT — bot đang chat bạn bè" : "Đang tắt — bot tư vấn bán hàng"} />
+        </div>
+        <p className="text-sm text-gray-500 mt-2 max-w-3xl">
+          Bật lên là bot <b>nghỉ bán hàng</b>, chuyển sang nói chuyện như bạn bè bình thường: ai nhắn gì rep nấy,
+          giải trí, cà khịa. Khi đang bật, bot không chèn tri thức/dịch vụ, không hỏi số điện thoại và không báo lead cho admin.
+          Chỉnh tính cách chi tiết tại Cài đặt → nhóm “Chế độ trò chuyện tự do”.
+        </p>
+      </section>
 
       <div className="grid md:grid-cols-2 gap-4 mt-6">
         <section className="bg-white dark:bg-neutral-900 p-5 rounded shadow">

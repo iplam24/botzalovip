@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import SystemSetting, User
 from ..deps import get_current_user, require_admin
+from ..services.ai_gateway import PROMPT_TRO_CHUYEN_TU_DO_MAC_DINH
 
 router = APIRouter(prefix="/api/cai-dat", tags=["Cài đặt hệ thống"])
 
@@ -29,6 +30,8 @@ NHOM_CAI_DAT = {
                     "mo_ta": "Cách bot vận hành: giờ hoạt động, từ khóa cấm, tin nhắn chào/ngoài giờ, ngưỡng chuyển nhân viên."},
     "phong_cach": {"ten": "Phong cách trả lời", "icon": "fa-solid fa-wand-magic-sparkles",
                    "mo_ta": "Danh tính, xưng hô, giọng điệu và độ sáng tạo của câu trả lời AI (chống trả lời một motip)."},
+    "tro_chuyen": {"ten": "Chế độ trò chuyện tự do", "icon": "fa-solid fa-face-laugh-wink",
+                   "mo_ta": "Bật lên là bot NGHỈ BÁN HÀNG, chuyển sang nói chuyện như bạn bè bình thường: ai nhắn gì rep nấy, giải trí, cà khịa. Khi bật: không chèn tri thức/doanh nghiệp, không hỏi số điện thoại, không báo lead cho admin."},
     "doanh_nghiep": {"ten": "Thông tin doanh nghiệp", "icon": "fa-solid fa-building",
                      "mo_ta": "Thông tin doanh nghiệp được đưa vào ngữ cảnh AI để trả lời khách chính xác."},
     "thu_thap": {"ten": "Thu thập thông tin", "icon": "fa-solid fa-clipboard-list",
@@ -66,6 +69,10 @@ DANG_KY_CAI_DAT = [
        "Khách yêu cầu gặp nhân viên đủ số lần này trong một hội thoại thì bot chuyển cho nhân viên. 1 = chuyển ngay lần đầu.", "so", 1, min=1, max=10),
     _k("tin_chao_khach_moi", "hanh_vi_bot", "Tin nhắn chào khách mới",
        "Câu chào được nối vào đầu câu trả lời đầu tiên cho khách nhắn lần đầu. Để trống = không chào riêng.", "textarea", ""),
+    _k("bot_chu_dong_pr", "hanh_vi_bot", "Bot chủ động giới thiệu dịch vụ (PR)",
+       "Bật: danh sách dịch vụ đang mở bán được đưa vào prompt để bot chủ động giới thiệu ngắn gọn khi khách chưa rõ nhu cầu, thay vì hỏi trống. Tắt: bot chỉ tư vấn khi khách hỏi tới.", "bool", True),
+    _k("so_dich_vu_pr", "hanh_vi_bot", "Số dịch vụ đưa vào ngữ cảnh PR",
+       "Tối đa bao nhiêu dịch vụ đang mở bán được đưa vào prompt mỗi lượt trả lời.", "so", 5, min=1, max=20),
     _k("cau_khi_bot_khong_tra_loi", "hanh_vi_bot", "Tin nhắn khi bot không trả lời được",
        "Khi nhà cung cấp AI lỗi, bot gửi câu này cho khách thay vì im lặng. Để trống = im lặng và báo admin (hành vi hiện tại).", "textarea", ""),
     # ---- Nhóm: Phong cách trả lời (mục 10 — chống một motip) ----
@@ -90,6 +97,14 @@ DANG_KY_CAI_DAT = [
        "Đoạn hướng dẫn riêng của quản trị viên được thêm vào prompt hệ thống (ví dụ quy tắc riêng của doanh nghiệp).", "textarea", ""),
     _k("so_tin_nhan_ngu_canh", "phong_cach", "Số tin lịch sử truyền cho AI",
        "Số tin gần nhất của hội thoại được truyền làm lịch sử đa lượt để AI nhớ ngữ cảnh, không chào lại/lặp lại.", "so", 10, min=1, max=50),
+    # ---- Nhóm: Chế độ trò chuyện tự do ----
+    _k("che_do_tro_chuyen_tu_do", "tro_chuyen", "Bật chế độ trò chuyện tự do",
+       "BẬT = bot nghỉ tư vấn/bán hàng, chuyển sang chat như bạn bè (giải trí, cà khịa). TẮT = bot tư vấn bán hàng như bình thường. Mặc định tắt.", "bool", False),
+    _k("prompt_tro_chuyen_tu_do", "tro_chuyen", "Persona trò chuyện tự do (toàn văn)",
+       "Toàn bộ chỉ dẫn tính cách của bot khi ở chế độ tự do — sửa tự do theo ý muốn, bot nghe đúng theo đoạn này.", "textarea",
+       PROMPT_TRO_CHUYEN_TU_DO_MAC_DINH),
+    _k("nhiet_do_tu_do", "tro_chuyen", "Độ ngẫu hứng khi trò chuyện tự do (temperature)",
+       "Dùng thay cho temperature tư vấn khi ở chế độ tự do. Càng cao càng ngẫu hứng/linh hoạt. Khoảng 0 – 2.", "so", 1.1, min=0, max=2),
     # ---- Nhóm: Thông tin doanh nghiệp ----
     _k("doanh_nghiep_ten", "doanh_nghiep", "Tên doanh nghiệp", "Đưa vào ngữ cảnh AI.", "text", ""),
     _k("doanh_nghiep_dia_chi", "doanh_nghiep", "Địa chỉ doanh nghiệp", "Đưa vào ngữ cảnh AI.", "text", ""),
@@ -143,6 +158,8 @@ DANG_KY_CAI_DAT = [
     _k("danh_sach_nhom_duoc_phep", "nhom_gui_tin", "Danh sách nhóm được phép (ID nhóm, phân cách dấu phẩy)",
        "Để trống = mọi nhóm (vẫn phải tag đúng). Có danh sách = chỉ các nhóm này bot mới hoạt động.", "textarea", ""),
     # ---- Nhóm: Hệ thống & module ----
+    _k("bo_nho_tom_tat_sau_bao_nhieu_tin", "he_thong", "Tóm tắt hồ sơ khách sau mỗi (tin nhắn của khách)",
+       "Sau mỗi bấy nhiêu tin nhắn mới của khách, bot tự tóm tắt gộp thành hồ sơ dài hạn (bot nhớ về khách) và dùng trong các lượt trả lời sau.", "so", 6, min=1, max=100),
     _k("mui_gio", "he_thong", "Múi giờ hệ thống", "Mặc định Asia/Ho_Chi_Minh.", "select", "Asia/Ho_Chi_Minh",
        lua_chon=["Asia/Ho_Chi_Minh", "Asia/Bangkok", "Asia/Singapore", "Asia/Tokyo", "UTC"]),
     _k("mau_chu_dao_giao_dien", "he_thong", "Màu chủ đạo giao diện",

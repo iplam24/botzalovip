@@ -50,15 +50,15 @@ export function taiBlobXuong(blob: Blob, tenFile: string) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-// Đợt nâng cấp 2: đăng nhập nội bộ CHỈ bằng tên đăng nhập (username), không mật khẩu.
-export const dangNhap = async (username: string) => {
+// Đăng nhập bằng USERNAME + MẬT KHẨU (đính chính: username thay email, vẫn có mật khẩu).
+export const dangNhap = async (username: string, password: string) => {
   const r = await fetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username }),
+    body: JSON.stringify({ username, password }),
   });
   if (!r.ok) {
-    let chiTiet = "Tên đăng nhập không đúng hoặc tài khoản đã bị khóa";
+    let chiTiet = "Tên đăng nhập hoặc mật khẩu không đúng, hoặc tài khoản đã bị khóa";
     try {
       const j = await r.json();
       if (j.detail) chiTiet = j.detail;

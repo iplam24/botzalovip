@@ -92,10 +92,22 @@ def _cai_dat_hieu_luc(db, cai_dat):
     except Exception:
         return {}
 
-def tao_system_prompt(cai_dat: dict = None, context_chunks: list = None, memories: list = None) -> str:
+LUAT_PR_CHU_DONG = (
+    "Luật giới thiệu dịch vụ chủ động (như nhân viên bán hàng thật):\n"
+    "- Khi khách mới chào hỏi, hỏi mơ hồ hoặc chưa rõ nhu cầu: hãy giới thiệu NGẮN GỌN 1-2 dịch vụ nổi bật "
+    "trong danh sách dịch vụ bên dưới và gợi mở theo nhu cầu của khách. TUYỆT ĐỐI tránh câu hỏi trống chung chung "
+    "kiểu 'anh/chị đang cần hỗ trợ về sản phẩm hay dịch vụ nào ạ?'.\n"
+    "- Khi đã có ngữ cảnh rõ: tư vấn bám sát đúng nhu cầu đang bàn, và khi thật tự nhiên thì gợi ý thêm dịch vụ "
+    "liên quan trong danh sách.\n"
+    "- Không PR dồn dập ở mọi lượt trả lời: chỉ gợi ý dịch vụ khi hợp ngữ cảnh hoặc khi khách chưa có chủ đề; "
+    "nếu khách đang hỏi việc cụ thể khác thì trả lời việc đó trước."
+)
+
+def tao_system_prompt(cai_dat: dict = None, context_chunks: list = None, memories: list = None,
+                      dich_vu: list = None, ho_so_khach: str = "") -> str:
     """Dựng prompt hệ thống: persona + luật chống motip + giọng (từ Cài đặt)
-    + thông tin doanh nghiệp + ngữ cảnh tri thức/bộ nhớ (nằm ở SYSTEM,
-    không dán vào câu hỏi của khách)."""
+    + thông tin doanh nghiệp + danh sách dịch vụ (PR chủ động) + HỒ SƠ KHÁCH
+    dài hạn + ngữ cảnh tri thức/bộ nhớ (nằm ở SYSTEM, không dán vào câu hỏi)."""
     cd = cai_dat or {}
     ten = str(cd.get("bot_ten_hien_thi") or cd.get("ten_hien_thi_bot") or "Trợ lý hỗ trợ khách hàng").strip()
     xung_ho = str(cd.get("bot_cach_xung_ho") or "em/bạn")
@@ -122,6 +134,24 @@ def tao_system_prompt(cai_dat: dict = None, context_chunks: list = None, memorie
     if cd.get("thong_tin_doanh_nghiep_bo_sung"): tt_dn.append(str(cd["thong_tin_doanh_nghiep_bo_sung"]))
     if tt_dn:
         cac_dong.append("Thông tin doanh nghiệp (chỉ dùng khi liên quan):\n" + "\n".join(tt_dn))
+    if dich_vu:
+        dong_dv = []
+        for dv in dich_vu:
+            dong = f"- {dv.get('ten', '')}"
+            if dv.get("gia"):
+                dong += f" — {dv['gia']}"
+            if dv.get("mo_ta"):
+                dong += f": {dv['mo_ta']}"
+            dong_dv.append(dong)
+        cac_dong.append("Dịch vụ đang cung cấp:\n" + "\n".join(dong_dv))
+        cac_dong.append(LUAT_PR_CHU_DONG)
+    if ho_so_khach and str(ho_so_khach).strip():
+        cac_dong.append(
+            "HỒ SƠ KHÁCH (bot nhớ lâu dài):\n" + str(ho_so_khach).strip() + "\n"
+            "Hãy dùng những gì đã nhớ một cách TỰ NHIÊN: gọi đúng tên khách nếu biết, nhắc lại nhu cầu/sở thích cũ "
+            "khi thật liên quan để khách cảm nhận được bot nhớ họ — nhưng nói như người thật đang nhớ, "
+            "không đọc thuộc lòng hay liệt kê lại hồ sơ."
+        )
     if context_chunks:
         cac_dong.append("Ngữ cảnh tri thức liên quan (chỉ dựa vào đây để trả lời, không bịa thêm):\n"
                         + "\n".join(f"- {c.get('content', '')}" for c in context_chunks))
@@ -132,16 +162,64 @@ def tao_system_prompt(cai_dat: dict = None, context_chunks: list = None, memorie
         cac_dong.append(f"Hướng dẫn bổ sung của quản trị viên:\n{cd['prompt_bo_sung']}")
     return "\n".join(cac_dong)
 
+# ---- Chế độ TRÒ CHUYỆN TỰ DO: bot nghỉ bán hàng, chat như bạn bè ----
+# Persona mặc định; quản trị viên sửa được TOÀN VĂN trên UI qua khóa cài đặt
+# "prompt_tro_chuyen_tu_do" (registry trong routers/cai_dat.py import hằng này).
+PROMPT_TRO_CHUYEN_TU_DO_MAC_DINH = (
+    "Bạn là một người bạn thân thiết đang nhắn Zalo với đối phương — KHÔNG phải nhân viên bán hàng, "
+    "KHÔNG phải trợ lý, KHÔNG phải AI. Hãy nói chuyện như hai người bạn thân đang tám chuyện:\n"
+    "- Ai nhắn gì thì đáp nấy: tám chuyện, giải trí, cà khịa qua lại, bắt trend, dùng ngôn ngữ chat "
+    "tự nhiên của giới trẻ (teencode/tiếng lóng vừa phải theo nhịp của đối phương).\n"
+    "- Xưng hô linh hoạt theo cách đối phương xưng hô (mày/tao, tớ/cậu, tui/bạn, mình/bạn...): "
+    "họ thân mật thì mình thân mật lại, họ lịch sự thì mình lịch sự lại.\n"
+    "- Được phép chửi thề và cà khịa kiểu bạn bè thân khi đối phương cũng đùa theo hướng đó — "
+    "nhưng là đùa vui qua lại, không xúc phạm thật sự, không công kích ngoại hình/hoàn cảnh của đối phương.\n"
+    "- Trả lời NGẮN kiểu chat thật (thường 1-3 câu), hài hước, đa dạng cách diễn đạt, không lặp cấu trúc, "
+    "không chào lại ở các lượt sau, không kết câu khuôn mẫu kiểu chăm sóc khách hàng.\n"
+    "- TUYỆT ĐỐI không tự nhắc mình là AI/trợ lý/bot; không tự lôi sản phẩm, dịch vụ, giá cả hay khuyến mãi "
+    "vào câu chuyện trừ khi đối phương tự hỏi đến chuyện mua bán.\n"
+    "- Không hỏi xin số điện thoại hay thông tin cá nhân của đối phương."
+)
+
+def la_tro_chuyen_tu_do(cai_dat: dict = None) -> bool:
+    """Chế độ trò chuyện tự do đang BẬT hay không (theo Cài đặt runtime)."""
+    return bool((cai_dat or {}).get("che_do_tro_chuyen_tu_do"))
+
+def tao_prompt_tu_do(cai_dat: dict = None) -> str:
+    """System prompt cho chế độ tự do = persona admin cấu hình (toàn văn).
+    Không chèn tri thức/doanh nghiệp/luật tư vấn — chỉ thêm tên hiển thị nếu có."""
+    cd = cai_dat or {}
+    goc = str(cd.get("prompt_tro_chuyen_tu_do") or "").strip() or PROMPT_TRO_CHUYEN_TU_DO_MAC_DINH
+    ten = str(cd.get("bot_ten_hien_thi") or "").strip()
+    if ten:
+        goc += f"\nTên của bạn khi nói chuyện: {ten}."
+    return goc
+
 import itertools
 _dem_luan_phien_mock = itertools.count()
 
 class MockAIProvider:
     """Mock provider: mỗi nhóm tình huống có 2-3 biến thể chọn LUÂN PHIÊN
     để bản demo cũng không trả lời một motip (mục 10)."""
-    def generate(self, prompt: str, context_chunks: list, memories: list):
+    def generate(self, prompt: str, context_chunks: list, memories: list, tro_chuyen_tu_do: bool = False):
         from .text_utils import classify_intent
         intent = classify_intent(prompt or "")
         lan = next(_dem_luan_phien_mock)
+        if tro_chuyen_tu_do:
+            # Mô phỏng chế độ bạn bè: đáp theo nhịp chat, không tư vấn/bán hàng
+            if intent == "chao_hoi":
+                bien_the = [
+                    "Ê chàooo, nay có gì vui không kể nghe coi =))",
+                    "Chào nha, rảnh ghê ha, tám gì không?",
+                    "Hellooo, xuất hiện đúng lúc tui đang chán nè",
+                ]
+            else:
+                bien_the = [
+                    "Thiệt không đó =)) kể tiếp đi, đang hay",
+                    "Ừa ừa, rồi sao nữa, hóng ghê",
+                    "Nghe cũng hợp lý á, mà còn tùy tâm trạng nữa =))",
+                ]
+            return bien_the[lan % len(bien_the)]
         if context_chunks:
             top = context_chunks[0]["content"]
             bien_the = [
@@ -215,7 +293,7 @@ def parse_chat_response(raw_text: str, content_type: str = ""):
 def get_default_provider(db: Session):
     return db.query(AIProviderConfig).filter(AIProviderConfig.is_default == True, AIProviderConfig.is_active == True).first() or db.query(AIProviderConfig).filter(AIProviderConfig.is_active == True).first()
 
-def generate_reply(db: Session, provider: AIProviderConfig, question: str, context_chunks: list, memories: list, goi_y_hoi_sdt: bool = False, lich_su: list = None, cai_dat: dict = None):
+def generate_reply(db: Session, provider: AIProviderConfig, question: str, context_chunks: list, memories: list, goi_y_hoi_sdt: bool = False, lich_su: list = None, cai_dat: dict = None, dich_vu: list = None, ho_so_khach: str = ""):
     """Sinh câu trả lời. Mục 10 (chống một motip):
     - lich_su: các tin gần nhất của hội thoại [{role: user|assistant, content}]
       được truyền thành messages đa lượt đúng thứ tự (model nhớ ngữ cảnh,
@@ -225,14 +303,21 @@ def generate_reply(db: Session, provider: AIProviderConfig, question: str, conte
     """
     alias_model = provider.model if provider else "mock-model"
     cd = _cai_dat_hieu_luc(db, cai_dat)
+    tu_do = la_tro_chuyen_tu_do(cd)
     try:
         if not provider or provider.provider == "mock":
-            text = MockAIProvider().generate(question, context_chunks, memories)
+            # Chế độ tự do: mock cũng không dùng tri thức/bộ nhớ tư vấn
+            text = MockAIProvider().generate(question,
+                                             [] if tu_do else context_chunks,
+                                             [] if tu_do else memories,
+                                             tro_chuyen_tu_do=tu_do)
             db.add(AIUsage(provider_id=provider.id if provider else None, model=alias_model, prompt_tokens=len(question.split()), completion_tokens=len(text.split()), status="thanh_cong")); db.commit()
             return text, alias_model
         key = decrypt_secret(provider.api_key_encrypted)
         if not key or not provider.base_url: raise AIError("Chưa cấu hình khóa API hoặc địa chỉ API cho nhà cung cấp này")
-        system_prompt = tao_system_prompt(cd, context_chunks, memories)
+        # Chế độ tự do: system prompt CHỈ là persona bạn bè — không tri thức,
+        # không thông tin doanh nghiệp, không luật tư vấn bán hàng.
+        system_prompt = tao_prompt_tu_do(cd) if tu_do else tao_system_prompt(cd, context_chunks, memories, dich_vu=dich_vu, ho_so_khach=ho_so_khach)
         messages = [{"role": "system", "content": system_prompt}]
         for m in (lich_su or []):
             role = m.get("role") if isinstance(m, dict) else None
@@ -240,16 +325,21 @@ def generate_reply(db: Session, provider: AIProviderConfig, question: str, conte
             if role in ("user", "assistant") and content:
                 messages.append({"role": role, "content": str(content)})
         noi_dung_hoi = question
-        if goi_y_hoi_sdt:
+        if goi_y_hoi_sdt and not tu_do:
             # Khách chưa có SĐT: gợi ý model kết thúc bằng câu hỏi xin số điện thoại tự nhiên
             cau_hoi = str(cd.get("thu_thap_cau_hoi_sdt") or "Anh/chị cho em xin số điện thoại để tư vấn viên liên hệ tư vấn chi tiết hơn ạ.")
             noi_dung_hoi += f"\n(Khách chưa cung cấp số điện thoại. Hãy kết thúc câu trả lời bằng một câu hỏi xin số điện thoại thật tự nhiên, gần với câu mẫu: \"{cau_hoi}\")"
         messages.append({"role": "user", "content": noi_dung_hoi})
         try:
-            temperature = float(cd.get("ai_temperature", 0.85))
+            if tu_do:
+                # Chế độ tự do dùng nhiệt độ riêng (mặc định 1.1, khoảng 0-2)
+                temperature = float(cd.get("nhiet_do_tu_do", 1.1))
+                temperature = min(2.0, max(0.0, temperature))
+            else:
+                temperature = float(cd.get("ai_temperature", 0.85))
+                temperature = min(1.5, max(0.0, temperature))
         except (TypeError, ValueError):
-            temperature = 0.85
-        temperature = min(1.5, max(0.0, temperature))
+            temperature = 1.1 if tu_do else 0.85
         payload = {"model": provider.model, "stream": False, "messages": messages, "temperature": temperature}
         if provider.max_tokens:
             payload["max_tokens"] = provider.max_tokens

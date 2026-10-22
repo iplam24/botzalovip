@@ -29,6 +29,10 @@ def seed():
         if "email" not in cust_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE customers ADD COLUMN email VARCHAR DEFAULT ''"))
+        # Bộ nhớ dài hạn theo khách: hồ sơ tóm tắt (TEXT hợp lệ cả Postgres lẫn SQLite)
+        if "memory_summary" not in cust_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE customers ADD COLUMN memory_summary TEXT DEFAULT ''"))
         # Đợt nâng cấp 2: users.username (đăng nhập chỉ bằng username) + last_login_at
         # Mỗi cột một giao dịch riêng; dùng TIMESTAMP (hợp lệ cả PostgreSQL lẫn SQLite,
         # DATETIME chỉ có ở SQLite/MySQL — từng gây lỗi khởi động trên Postgres thật).

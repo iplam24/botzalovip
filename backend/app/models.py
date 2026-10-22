@@ -36,6 +36,8 @@ class Customer(Base):
     group_name = Column(String, default=""); notes = Column(Text, default="")
     assignee = Column(String, default=""); last_interaction_at = Column(DateTime, default=now)
     created_at = Column(DateTime, default=now)
+    # Hồ sơ tóm tắt dài hạn về khách (bot "nhớ cực lâu") — AI tóm tắt gộp định kỳ
+    memory_summary = Column(Text, default="")
 
 class ZaloAccount(Base):
     __tablename__ = "zalo_accounts"

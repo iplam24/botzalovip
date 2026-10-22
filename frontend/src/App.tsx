@@ -53,6 +53,7 @@ function UngDung() {
   const [sucKhoe, setSucKhoe] = useState<null | boolean>(null);
   const [tenNguoiDung, setTenNguoiDung] = useState("");
   const [soThongBaoChuaDoc, setSoThongBaoChuaDoc] = useState(0);
+  const [cheDoTuDo, setCheDoTuDo] = useState(false);
 
   // Header: kiểm tra sức khỏe thật qua /api/suc-khoe mỗi 30 giây
   useEffect(() => {
@@ -72,7 +73,8 @@ function UngDung() {
     return () => { dung = true; clearInterval(t); };
   }, [daDangNhap]);
 
-  // Chuông thông báo: đếm số thông báo admin chưa đọc thật, kiểm tra mỗi 30 giây
+  // Chuông thông báo: đếm số thông báo admin chưa đọc thật, kiểm tra mỗi 30 giây.
+  // Kèm kiểm tra chế độ trò chuyện tự do để hiện huy hiệu trên header (admin khỏi quên tắt).
   useEffect(() => {
     if (!daDangNhap) return;
     let dung = false;
@@ -83,6 +85,11 @@ function UngDung() {
         if (!r.ok) return;
         const d = await r.json();
         if (!dung) setSoThongBaoChuaDoc(d.chua_doc || 0);
+        const r2 = await fetch("/api/cai-dat", { headers: { Authorization: `Bearer ${token}` } });
+        if (r2.ok) {
+          const cd = await r2.json();
+          if (!dung) setCheDoTuDo(!!cd.che_do_tro_chuyen_tu_do);
+        }
       } catch { /* bỏ qua, chuông chỉ là chỉ báo phụ */ }
     };
     kiemTra();
@@ -248,6 +255,16 @@ function UngDung() {
                     : "Không kết nối được máy chủ — kiểm tra backend"}
               </span>
             </span>
+            {cheDoTuDo && (
+              <button
+                onClick={() => diToi("Cài đặt")}
+                title="Bot đang ở chế độ trò chuyện tự do (nghỉ bán hàng) — bấm để vào Cài đặt tắt/bật"
+                className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 border border-amber-300 font-semibold px-2.5 py-1 rounded-full text-xs hover:bg-amber-200 transition-colors"
+              >
+                <i className="fa-solid fa-face-laugh-wink" />
+                Đang ở chế độ trò chuyện tự do
+              </button>
+            )}
             <span className="text-gray-500 hidden md:inline">
               Phân hệ: <b className="text-gray-800 dark:text-gray-100">{MENU[trangHienTai].ten}</b>
             </span>

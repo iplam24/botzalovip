@@ -3,15 +3,18 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 class LoginIn(BaseModel):
-    # Đợt nâng cấp 2: đăng nhập NỘI BỘ chỉ bằng tên đăng nhập (username),
-    # không dùng mật khẩu nữa theo lựa chọn của chủ hệ thống.
+    # Đính chính (LAM, 22/10): đăng nhập bằng USERNAME + MẬT KHẨU — username
+    # thay cho email như hệ thống cũ, mật khẩu vẫn bắt buộc và được kiểm tra hash.
     username: str
+    password: str
 class UserCreate(BaseModel):
     username: Optional[str] = None; email: str = ""; password: str = ""
     full_name: str = ""; role: str = "NhanVien"
 class UserUpdate(BaseModel):
     username: Optional[str] = None; email: Optional[str] = None; full_name: Optional[str] = None
     role: Optional[str] = None; is_active: Optional[bool] = None
+    # Đặt mật khẩu mới khi sửa người dùng (để trống/không gửi = giữ nguyên mật khẩu cũ)
+    password: Optional[str] = None
 class BatTatIn(BaseModel): is_active: bool
 class PhanBoIn(BaseModel): admin_user_id: Optional[int] = None; ghi_chu: Optional[str] = None
 class PhanBoHangLoatIn(BaseModel): ids: List[int]; admin_user_id: Optional[int] = None
@@ -22,7 +25,7 @@ class ProviderUpdate(BaseModel):
     name: Optional[str] = None; provider: Optional[str] = None; base_url: Optional[str] = None; api_key: Optional[str] = None
     model: Optional[str] = None; embedding_model: Optional[str] = None; max_tokens: Optional[int] = None; timeout: Optional[int] = None
     is_active: Optional[bool] = None; is_default: Optional[bool] = None
-class CustomerIn(BaseModel): external_id: Optional[str] = None; display_name: str = ""; phone: str = ""; email: str = ""; labels: str = ""; group_name: str = ""; notes: str = ""; assignee: str = ""
+class CustomerIn(BaseModel): external_id: Optional[str] = None; display_name: str = ""; phone: str = ""; email: str = ""; labels: str = ""; group_name: str = ""; notes: str = ""; assignee: str = ""; memory_summary: str = ""
 class CollectedInfoIn(BaseModel): field: str; value: str; verified: bool = False
 class CollectedInfoUpdate(BaseModel): value: Optional[str] = None; verified: Optional[bool] = None
 class ServiceIn(BaseModel): code: Optional[str] = None; name: str; description: str = ""; category: str = ""; price: float = 0; price_text: str = ""; policy: str = ""; faq: str = ""; keywords: str = ""; is_active: bool = True

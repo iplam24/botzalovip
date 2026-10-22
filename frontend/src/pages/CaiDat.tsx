@@ -22,6 +22,9 @@ export default function CaiDat() {
   const [nhomDs, setNhomDs] = useState<any[]>([]);
   const [khoaDs, setKhoaDs] = useState<KhoaCaiDat[]>([]);
   const [giaTri, setGiaTri] = useState<Record<string, any>>({});
+  const [giaTriGoc, setGiaTriGoc] = useState<Record<string, any>>({}); // bản đã lưu gần nhất — để biết khóa nào đang "bẩn" (chưa lưu)
+  const [dangLuuTatCa, setDangLuuTatCa] = useState(false);
+  const [vuaLuuLuc, setVuaLuuLuc] = useState<string | null>(null); // mốc vừa lưu xong để hiện thanh "Đã lưu ✓"
   const [nhomChon, setNhomChon] = useState("hanh_vi_bot");
   const [timKiem, setTimKiem] = useState("");
   const [dangTai, setDangTai] = useState(true);
@@ -43,6 +46,7 @@ export default function CaiDat() {
       const gt: Record<string, any> = {};
       (dk.cai_dat || []).forEach((c: KhoaCaiDat) => { gt[c.khoa] = c.gia_tri; });
       setGiaTri(gt);
+      setGiaTriGoc(gt);
       setSucKhoe(sk);
     } catch (e: any) {
       setLoi(e.message);
@@ -55,15 +59,26 @@ export default function CaiDat() {
 
   const dat = (khoa: string, v: any) => setGiaTri((cu) => ({ ...cu, [khoa]: v }));
 
-  const luuNhom = async (nhomKhoa: string) => {
+  const luuNhomCore = async (nhomKhoa: string) => {
     const khoaCuaNhom = khoaDs.filter((c) => c.nhom === nhomKhoa);
     const body: Record<string, any> = {};
     khoaCuaNhom.forEach((c) => { body[c.khoa] = giaTri[c.khoa]; });
+    const kq = await api("/api/cai-dat", { method: "PUT", body: JSON.stringify(body) });
+    setGiaTri((cu) => ({ ...cu, ...kq }));
+    setGiaTriGoc((cu) => {
+      const moi = { ...cu };
+      khoaCuaNhom.forEach((c) => { moi[c.khoa] = kq[c.khoa]; });
+      return moi;
+    });
+    setLuuLuc((cu) => ({ ...cu, [nhomKhoa]: new Date().toISOString() }));
+    return kq;
+  };
+
+  const luuNhom = async (nhomKhoa: string) => {
     setDangLuuNhom(nhomKhoa);
     try {
-      const kq = await api("/api/cai-dat", { method: "PUT", body: JSON.stringify(body) });
-      setGiaTri((cu) => ({ ...cu, ...kq }));
-      setLuuLuc((cu) => ({ ...cu, [nhomKhoa]: new Date().toISOString() }));
+      await luuNhomCore(nhomKhoa);
+      setVuaLuuLuc(new Date().toISOString());
       toast.thanhCong(`Đã lưu nhóm “${nhomDs.find((n) => n.khoa_nhom === nhomKhoa)?.ten || nhomKhoa}”. Thay đổi có hiệu lực ngay.`);
     } catch (e: any) {
       toast.loi(`Lưu thất bại: ${e.message} (lưu cài đặt yêu cầu quyền quản trị viên)`);
@@ -71,6 +86,37 @@ export default function CaiDat() {
       setDangLuuNhom(null);
     }
   };
+
+  // Các khóa đang sửa chưa lưu (so với bản đã lưu gần nhất) + nhóm chứa chúng
+  const khoaChuaLuu = useMemo(
+    () => khoaDs.filter((c) => JSON.stringify(giaTri[c.khoa]) !== JSON.stringify(giaTriGoc[c.khoa])),
+    [khoaDs, giaTri, giaTriGoc]);
+  const nhomChuaLuu = useMemo(
+    () => Array.from(new Set(khoaChuaLuu.map((c) => c.nhom))),
+    [khoaChuaLuu]);
+
+  const luuTatCa = async () => {
+    if (nhomChuaLuu.length === 0) return;
+    setDangLuuTatCa(true);
+    try {
+      for (const nk of nhomChuaLuu) {
+        await luuNhomCore(nk);
+      }
+      setVuaLuuLuc(new Date().toISOString());
+      toast.thanhCong(`Đã lưu ${khoaChuaLuu.length} thay đổi. Thay đổi có hiệu lực ngay.`);
+    } catch (e: any) {
+      toast.loi(`Lưu thất bại: ${e.message} (lưu cài đặt yêu cầu quyền quản trị viên)`);
+    } finally {
+      setDangLuuTatCa(false);
+    }
+  };
+
+  // Thanh "Đã lưu ✓" tự ẩn sau vài giây (chỉ khi không còn thay đổi chưa lưu)
+  useEffect(() => {
+    if (!vuaLuuLuc || khoaChuaLuu.length > 0) return;
+    const t = setTimeout(() => setVuaLuuLuc(null), 5000);
+    return () => clearTimeout(t);
+  }, [vuaLuuLuc, khoaChuaLuu.length]);
 
   const khoiPhucNhom = async (nhomKhoa: string) => {
     setDangLuuNhom(nhomKhoa);
@@ -234,6 +280,41 @@ export default function CaiDat() {
               </div>
             )}
           </section>
+        </div>
+      )}
+
+      {/* Thanh LƯU DÍNH nổi bật: hiện ngay khi có thay đổi chưa lưu ở bất kỳ
+          nhóm nào — nút Lưu lớn màu chủ đạo luôn trong tầm mắt, khó quên. */}
+      {(khoaChuaLuu.length > 0 || vuaLuuLuc) && (
+        <div className="fixed bottom-4 inset-x-3 sm:inset-x-6 z-50 flex justify-center pointer-events-none">
+          <div className={`pointer-events-auto w-full max-w-3xl rounded-2xl shadow-2xl px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 ${
+            khoaChuaLuu.length > 0 ? "bg-thuongHieu-600 text-white" : "bg-green-600 text-white"}`}>
+            {khoaChuaLuu.length > 0 ? (
+              <>
+                <span className="font-semibold">
+                  <i className="fa-solid fa-triangle-exclamation mr-2" />
+                  Có {khoaChuaLuu.length} thay đổi chưa lưu
+                </span>
+                <span className="text-white/85 text-sm">
+                  ở {nhomChuaLuu.length} nhóm — chưa lưu là chưa có hiệu lực đâu nhé
+                </span>
+                <span className="flex-1" />
+                <button
+                  onClick={luuTatCa}
+                  disabled={dangLuuTatCa}
+                  className="bg-white text-thuongHieu-700 font-bold px-6 py-3 rounded-xl text-base shadow hover:bg-thuongHieu-50 disabled:opacity-60 transition-colors"
+                >
+                  <i className="fa-solid fa-floppy-disk mr-2" />
+                  {dangLuuTatCa ? "Đang lưu..." : "Lưu thay đổi"}
+                </button>
+              </>
+            ) : (
+              <span className="font-semibold">
+                <i className="fa-solid fa-circle-check mr-2" />
+                Đã lưu ✓ lúc {vuaLuuLuc ? new Date(vuaLuuLuc).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) : ""}
+              </span>
+            )}
+          </div>
         </div>
       )}
     </div>

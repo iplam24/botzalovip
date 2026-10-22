@@ -96,6 +96,22 @@ body {
 .cuon-dep::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
 .cuon-dep::-webkit-scrollbar-track { background: transparent; }
 
+/* Chân modal dính: hàng nút cuối cùng của form trong HopBieuMau (thường là
+   hàng Lưu/Hủy) luôn ghim ở đáy vùng cuộn — form dài vẫn thấy nút Lưu. */
+.than-modal form > div:last-child {
+  position: sticky;
+  bottom: -1.25rem; /* bù phần đệm dưới (pb-5) của vùng thân modal */
+  margin: 0.75rem -1.25rem -1.25rem;
+  padding: 0.75rem 1.25rem 1.25rem;
+  background: #fff;
+  border-top: 1px solid #e5e7eb;
+  z-index: 5;
+}
+.dark .than-modal form > div:last-child {
+  background: #171717;
+  border-top-color: #262626;
+}
+
 /* Vùng chạm thân thiện trên mobile */
 @media (max-width: 768px) {
   button, a, input, select, textarea {

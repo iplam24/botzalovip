@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/khach-hang", tags=["Khách hàng"])
 
 XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-def out(c): return {"id": c.id, "external_id": c.external_id, "display_name": c.display_name, "phone": c.phone, "email": c.email or "", "labels": c.labels, "group_name": c.group_name, "notes": c.notes, "assignee": c.assignee, "last_interaction_at": str(c.last_interaction_at) if c.last_interaction_at else "", "created_at": str(c.created_at) if c.created_at else ""}
+def out(c): return {"id": c.id, "external_id": c.external_id, "display_name": c.display_name, "phone": c.phone, "email": c.email or "", "labels": c.labels, "group_name": c.group_name, "notes": c.notes, "assignee": c.assignee, "memory_summary": getattr(c, "memory_summary", "") or "", "last_interaction_at": str(c.last_interaction_at) if c.last_interaction_at else "", "created_at": str(c.created_at) if c.created_at else ""}
 
 @router.get("")
 def list_c(tu_khoa: str = "", nhan: str = "", db: Session = Depends(get_db), u: User = Depends(get_current_user)):
@@ -95,6 +95,17 @@ def del_c(cid: int, db: Session = Depends(get_db), admin: User = Depends(require
     c=db.get(Customer,cid)
     if not c: raise HTTPException(404,"Không tìm thấy")
     db.delete(c); db.commit(); return {"da_xoa": True}
+
+@router.post("/{cid}/tom-tat-bo-nho")
+def tom_tat_bo_nho(cid: int, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
+    """Tóm tắt lại hồ sơ dài hạn của khách NGAY (không chờ đủ số tin)."""
+    from ..services import memory_service
+    c = _khach_hoac_404(db, cid)
+    tom_tat = memory_service.cap_nhat_tom_tat_bo_nho(db, c, force=True)
+    db.refresh(c)
+    return {"id": c.id, "memory_summary": c.memory_summary or "",
+            "da_tom_tat": bool(tom_tat),
+            "thong_bao": "Đã tóm tắt lại hồ sơ khách." if tom_tat else "Chưa tóm tắt được (khách chưa có tin nhắn nào hoặc nhà cung cấp AI đang lỗi)."}
 
 # ---- Thông tin thu thập (GĐ mở rộng 1) ----
 def tt_out(t): return {"id": t.id, "customer_id": t.customer_id, "field": t.field, "value": t.value,

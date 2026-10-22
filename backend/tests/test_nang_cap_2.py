@@ -17,32 +17,50 @@ def _dat_cai_dat(**kw):
     return r.json()
 
 
-# ---- Mục 1 + 9.3: đăng nhập chỉ username, tài khoản bị khóa, trang người dùng ----
-def test_41_dang_nhap_chi_username():
-    r_ok = client.post("/api/auth/login", json={"username": "admin"})
+# ---- Đính chính mục 1 + 9.3: đăng nhập USERNAME + MẬT KHẨU, khóa tài khoản, đổi mật khẩu ----
+def test_41_dang_nhap_username_va_mat_khau():
+    # Đúng username + đúng mật khẩu -> 200
+    r_ok = client.post("/api/auth/login", json={"username": "admin", "password": "Admin@12345"})
     assert r_ok.status_code == 200 and r_ok.json()["username"] == "admin"
-    # Sai username -> 401
-    assert client.post("/api/auth/login", json={"username": "khong-ton-tai"}).status_code == 401
-    # Đăng nhập kiểu cũ email/mật khẩu bị loại bỏ: thiếu username -> 422 (schema chỉ nhận username)
+    # Username không phân biệt hoa thường
+    assert client.post("/api/auth/login", json={"username": "ADMIN", "password": "Admin@12345"}).status_code == 200
+    # Sai mật khẩu -> 401 "Mật khẩu không đúng"
+    r_sai = client.post("/api/auth/login", json={"username": "admin", "password": "sai-mat-khau"})
+    assert r_sai.status_code == 401 and "Mật khẩu không đúng" in r_sai.json()["detail"]
+    # User không tồn tại -> 401
+    assert client.post("/api/auth/login", json={"username": "khong-ton-tai", "password": "x"}).status_code == 401
+    # Thiếu mật khẩu -> 422 (schema bắt buộc cả username và password)
+    assert client.post("/api/auth/login", json={"username": "admin"}).status_code == 422
+    # Kiểu cũ email + mật khẩu (không có username) -> 422
     assert client.post("/api/auth/login", json={"email": "admin@local", "password": "Admin@12345"}).status_code == 422
-    # Tạo người dùng có username riêng rồi đăng nhập được; ghi last_login_at
-    r = client.post("/api/auth/nguoi-dung", json={"username": "nhanvien1", "email": "nv1@test.local", "full_name": "Nhân Viên Một", "role": "NhanVien"}, headers=headers())
+    # Tạo người dùng mới bắt buộc đặt mật khẩu
+    assert client.post("/api/auth/nguoi-dung", json={"username": "nhanvien1", "email": "nv1@test.local", "full_name": "Nhân Viên Một", "role": "NhanVien"}, headers=headers()).status_code == 400
+    r = client.post("/api/auth/nguoi-dung", json={"username": "nhanvien1", "email": "nv1@test.local", "full_name": "Nhân Viên Một", "role": "NhanVien", "password": "Nv1@12345"}, headers=headers())
     assert r.status_code == 200 and r.json()["username"] == "nhanvien1", r.text
+    assert "hashed_password" not in r.text and "Nv1@12345" not in r.text  # không bao giờ lộ mật khẩu/hash
     uid = r.json()["id"]
-    lg = client.post("/api/auth/login", json={"username": "nhanvien1"})
+    lg = client.post("/api/auth/login", json={"username": "nhanvien1", "password": "Nv1@12345"})
     assert lg.status_code == 200
     ds = client.get("/api/auth/nguoi-dung", headers=headers()).json()
     nv = [u for u in ds if u["id"] == uid][0]
     assert nv["last_login_at"] and nv["is_active"] is True
     assert "so_khach_phu_trach" in nv and "so_ban_be_phu_trach" in nv
     # Trùng username -> 400
-    assert client.post("/api/auth/nguoi-dung", json={"username": "nhanvien1"}, headers=headers()).status_code == 400
-    # Khóa tài khoản -> đăng nhập 403; mở lại -> đăng nhập được
+    assert client.post("/api/auth/nguoi-dung", json={"username": "nhanvien1", "password": "Abc@12345"}, headers=headers()).status_code == 400
+    # Khóa tài khoản -> đăng nhập (dù đúng mật khẩu) 403; mở lại -> đăng nhập được
     r2 = client.put(f"/api/auth/nguoi-dung/{uid}", json={"is_active": False}, headers=headers())
     assert r2.json()["is_active"] is False
-    assert client.post("/api/auth/login", json={"username": "nhanvien1"}).status_code == 403
+    assert client.post("/api/auth/login", json={"username": "nhanvien1", "password": "Nv1@12345"}).status_code == 403
     client.put(f"/api/auth/nguoi-dung/{uid}", json={"is_active": True}, headers=headers())
-    assert client.post("/api/auth/login", json={"username": "nhanvien1"}).status_code == 200
+    assert client.post("/api/auth/login", json={"username": "nhanvien1", "password": "Nv1@12345"}).status_code == 200
+    # Đổi mật khẩu qua API người dùng -> mật khẩu mới đăng nhập được, mật khẩu cũ bị từ chối
+    r3 = client.put(f"/api/auth/nguoi-dung/{uid}", json={"password": "Moi@12345"}, headers=headers())
+    assert r3.status_code == 200 and "Moi@12345" not in r3.text
+    assert client.post("/api/auth/login", json={"username": "nhanvien1", "password": "Moi@12345"}).status_code == 200
+    assert client.post("/api/auth/login", json={"username": "nhanvien1", "password": "Nv1@12345"}).status_code == 401
+    # Sửa không gửi mật khẩu -> giữ nguyên mật khẩu hiện tại
+    client.put(f"/api/auth/nguoi-dung/{uid}", json={"full_name": "Nhân Viên Một (đổi tên)"}, headers=headers())
+    assert client.post("/api/auth/login", json={"username": "nhanvien1", "password": "Moi@12345"}).status_code == 200
 
 
 # ---- Mục 6: hàm chuẩn hoá định dạng Zalo ----
@@ -394,6 +412,213 @@ def test_54_registry_day_du_va_khoi_phuc_mac_dinh():
     client.post("/api/cai-dat/khoi-phuc-mac-dinh", json={"nhom": "nhom_gui_tin"}, headers=headers())
     cd = client.get("/api/cai-dat", headers=headers()).json()
     assert cd["do_tre_giua_cac_tin_ms"] == 700 and cd["gui_tin_chia_nho"] is True
+
+
+# ---- Chế độ TRÒ CHUYỆN TỰ DO + PR chủ động + bộ nhớ dài hạn ----
+def _dat_provider_mac_dinh_theo_ten(ten):
+    ds = client.get("/api/ai-providers", headers=headers()).json()
+    p = [x for x in ds if x["name"] == ten][0]
+    r = client.put(f"/api/ai-providers/{p['id']}", json={"is_default": True}, headers=headers())
+    assert r.status_code == 200, r.text
+    return p["id"]
+
+
+def _bat_payload(monkeypatch, noi_dung_tra_loi="Trả lời từ provider giả lập"):
+    """Chặn httpx.Client để bắt payload gửi provider (mẫu của test_51)."""
+    import json as _json
+    import httpx as _httpx
+    captured = {}
+    class FakeResp:
+        status_code = 200; headers = {"content-type": "application/json"}
+        text = _json.dumps({"model": "m-gia-lap", "choices": [{"message": {"content": noi_dung_tra_loi}}],
+                            "usage": {"prompt_tokens": 5, "completion_tokens": 2}})
+    class FakeClient:
+        def __init__(self, timeout=None, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def post(self, url, headers=None, json=None):
+            captured.clear(); captured.update(json or {}); return FakeResp()
+    monkeypatch.setattr(_httpx, "Client", FakeClient)
+    return captured
+
+
+def test_56_registry_nhom_tro_chuyen_tu_do():
+    d = client.get("/api/cai-dat/dang-ky", headers=headers()).json()
+    nhom = {n["khoa_nhom"] for n in d["nhom"]}
+    assert "tro_chuyen" in nhom
+    theo_khoa = {c["khoa"]: c for c in d["cai_dat"]}
+    assert theo_khoa["che_do_tro_chuyen_tu_do"]["kieu"] == "bool"
+    assert theo_khoa["che_do_tro_chuyen_tu_do"]["mac_dinh"] is False
+    assert theo_khoa["che_do_tro_chuyen_tu_do"]["gia_tri"] is False
+    assert theo_khoa["prompt_tro_chuyen_tu_do"]["kieu"] == "textarea"
+    assert "bạn thân" in theo_khoa["prompt_tro_chuyen_tu_do"]["mac_dinh"]
+    assert theo_khoa["nhiet_do_tu_do"]["kieu"] == "so" and theo_khoa["nhiet_do_tu_do"]["mac_dinh"] == 1.1
+    # Nhiệt độ tự do tối đa 2 — vượt là bị từ chối
+    assert client.put("/api/cai-dat", json={"nhiet_do_tu_do": 3}, headers=headers()).status_code == 400
+    # Khóa của phạm vi C cũng có trong registry
+    assert theo_khoa["bot_chu_dong_pr"]["mac_dinh"] is True and theo_khoa["so_dich_vu_pr"]["mac_dinh"] == 5
+    assert theo_khoa["bo_nho_tom_tat_sau_bao_nhieu_tin"]["mac_dinh"] == 6
+
+
+def test_57_che_do_tu_do_payload_khong_tri_thuc_khong_hoi_sdt(monkeypatch):
+    # Tài liệu tri thức có dấu vết riêng — chế độ tư vấn sẽ thấy, tự do thì không
+    r = client.post("/api/tri-thuc/tai-lieu", json={
+        "title": "Tài liệu kiểm thử 57",
+        "content": "TRI_THUC_TU_DO_57: thông tin chỉ có trong kho tri thức kiểm thử chế độ tự do."}, headers=headers())
+    assert r.status_code == 200, r.text
+    _dat_provider_mac_dinh_theo_ten("Provider stream test")
+    captured = _bat_payload(monkeypatch)
+    noi_dung_hoi = "tư vấn tri thuc tu do 57 cho mình với"
+    # --- BẬT chế độ tự do ---
+    _dat_cai_dat(che_do_tro_chuyen_tu_do=True,
+                 prompt_tro_chuyen_tu_do="PROMPT_TU_DO_DAC_TRUNG_57: bạn là bạn thân, cà khịa vui vẻ.",
+                 nhiet_do_tu_do=1.3)
+    r1 = client.post("/api/zalo/mock/nhan-tin-nhan", json={
+        "external_id": "td-57-1", "customer_external_id": "khach-tu-do-57",
+        "customer_name": "Khách Tự Do", "content": noi_dung_hoi}, headers=headers())
+    assert r1.status_code == 200 and r1.json()["tra_loi"] == "Trả lời từ provider giả lập", r1.text
+    msgs = captured["messages"]
+    he_thong = msgs[0]["content"]
+    assert "PROMPT_TU_DO_DAC_TRUNG_57" in he_thong
+    assert "TRI_THUC_TU_DO_57" not in he_thong  # không chèn tri thức
+    assert "Luật trò chuyện tự nhiên" not in he_thong  # không luật tư vấn
+    assert "HỒ SƠ KHÁCH" not in he_thong
+    assert captured["temperature"] == 1.3  # nhiệt độ riêng của chế độ tự do
+    assert "số điện thoại" not in msgs[-1]["content"]  # không gợi ý hỏi SĐT
+    # Lượt 2: vẫn truyền lịch sử hội thoại trong chế độ tự do
+    r2 = client.post("/api/zalo/mock/nhan-tin-nhan", json={
+        "external_id": "td-57-2", "customer_external_id": "khach-tu-do-57",
+        "customer_name": "Khách Tự Do", "content": "kể tiếp chuyện hồi nãy đi"}, headers=headers())
+    assert r2.json()["tra_loi"]
+    msgs2 = captured["messages"]
+    assert msgs2[1] == {"role": "user", "content": noi_dung_hoi}
+    assert msgs2[2]["role"] == "assistant"
+    # --- TẮT chế độ tự do: hành vi tư vấn như cũ ---
+    _dat_cai_dat(che_do_tro_chuyen_tu_do=False)
+    r3 = client.post("/api/zalo/mock/nhan-tin-nhan", json={
+        "external_id": "td-57-3", "customer_external_id": "khach-tu-van-57",
+        "customer_name": "Khách Tư Vấn", "content": noi_dung_hoi}, headers=headers())
+    assert r3.json()["tra_loi"] == "Trả lời từ provider giả lập"
+    he_thong_tv = captured["messages"][0]["content"]
+    assert "TRI_THUC_TU_DO_57" in he_thong_tv  # tri thức quay lại trong system
+    assert "Luật trò chuyện tự nhiên" in he_thong_tv
+    assert captured["temperature"] == 0.85  # temperature tư vấn mặc định
+    assert "số điện thoại" in captured["messages"][-1]["content"]  # gợi ý hỏi SĐT quay lại
+    # Dọn dẹp: khôi phục nhóm trò chuyện + provider mặc định về Mock
+    client.post("/api/cai-dat/khoi-phuc-mac-dinh", json={"nhom": "tro_chuyen"}, headers=headers())
+    _dat_provider_mac_dinh_theo_ten("Mock AI (mô phỏng)")
+
+
+def test_58_tu_do_tat_thong_bao_lead_nhung_van_thu_thap():
+    def dem_tb_sdt():
+        return len(client.get("/api/thong-bao?loai=co_so_dien_thoai", headers=headers()).json())
+    _dat_provider_mac_dinh_theo_ten("Mock AI (mô phỏng)")
+    dem_truoc = dem_tb_sdt()
+    _dat_cai_dat(che_do_tro_chuyen_tu_do=True)
+    r1 = client.post("/api/zalo/mock/nhan-tin-nhan", json={
+        "external_id": "td-58-1", "customer_external_id": "khach-sdt-tu-do",
+        "customer_name": "Khách SĐT Tự Do", "content": "sdt của mình là 0905123456 nhé, lưu lại dùm"}, headers=headers())
+    assert r1.json()["tra_loi"]
+    assert dem_tb_sdt() == dem_truoc  # đang chat giải trí -> KHÔNG báo lead
+    kh = [c for c in client.get("/api/khach-hang", headers=headers()).json() if c["external_id"] == "khach-sdt-tu-do"][0]
+    assert kh["phone"] == "0905123456"  # nhưng dữ liệu vẫn được thu thập lặng lẽ
+    _dat_cai_dat(che_do_tro_chuyen_tu_do=False)
+    r2 = client.post("/api/zalo/mock/nhan-tin-nhan", json={
+        "external_id": "td-58-2", "customer_external_id": "khach-sdt-tu-van",
+        "customer_name": "Khách SĐT Tư Vấn", "content": "số của tui 0912345678 đây nè"}, headers=headers())
+    assert r2.json()["tra_loi"]
+    assert dem_tb_sdt() == dem_truoc + 1  # chế độ tư vấn -> báo lead như cũ
+    client.post("/api/cai-dat/khoi-phuc-mac-dinh", json={"nhom": "tro_chuyen"}, headers=headers())
+
+
+def test_59_mock_khong_hoi_sdt_khi_tu_do():
+    _dat_provider_mac_dinh_theo_ten("Mock AI (mô phỏng)")
+    _dat_cai_dat(che_do_tro_chuyen_tu_do=True)
+    r1 = client.post("/api/zalo/mock/nhan-tin-nhan", json={
+        "external_id": "td-59-1", "customer_external_id": "khach-hoi-sdt-tu-do",
+        "customer_name": "Khách Hỏi Tự Do", "content": "cho mình tư vấn báo giá gói dịch vụ với"}, headers=headers())
+    assert r1.json()["tra_loi"] and "số điện thoại" not in r1.json()["tra_loi"]
+    _dat_cai_dat(che_do_tro_chuyen_tu_do=False)
+    r2 = client.post("/api/zalo/mock/nhan-tin-nhan", json={
+        "external_id": "td-59-2", "customer_external_id": "khach-hoi-sdt-tu-van",
+        "customer_name": "Khách Hỏi Tư Vấn", "content": "cho mình tư vấn báo giá gói dịch vụ với"}, headers=headers())
+    assert r2.json()["tra_loi"] and "số điện thoại" in r2.json()["tra_loi"]  # tư vấn thì hỏi như cũ
+    client.post("/api/cai-dat/khoi-phuc-mac-dinh", json={"nhom": "tro_chuyen"}, headers=headers())
+
+
+def test_60_pr_chu_dong_tiem_dich_vu_vao_prompt(monkeypatch):
+    r = client.post("/api/dich-vu", json={"name": "Dịch vụ PR 60 Alpha", "description": "Mô tả alpha rất hay cho khách", "price": 150000}, headers=headers())
+    assert r.status_code == 200, r.text
+    client.post("/api/dich-vu", json={"name": "Dịch vụ PR 60 Beta", "description": "Mô tả beta chưa có giá", "price": 0}, headers=headers())
+    _dat_provider_mac_dinh_theo_ten("Provider stream test")
+    captured = _bat_payload(monkeypatch)
+    _dat_cai_dat(che_do_tro_chuyen_tu_do=False, bot_chu_dong_pr=True, so_dich_vu_pr=20)
+    r1 = client.post("/api/zalo/mock/nhan-tin-nhan", json={
+        "external_id": "pr-60-1", "customer_external_id": "khach-pr-60",
+        "customer_name": "Khách PR", "content": "alo shop ơi, còn hoạt động không"}, headers=headers())
+    assert r1.json()["tra_loi"]
+    he_thong = captured["messages"][0]["content"]
+    assert "Dịch vụ PR 60 Alpha" in he_thong and "150.000đ" in he_thong and "Mô tả alpha" in he_thong
+    assert "Dịch vụ PR 60 Beta" in he_thong and "Beta —" not in he_thong  # giá 0 -> không in phần giá sau tên
+    assert "giới thiệu NGẮN GỌN" in he_thong and "TUYỆT ĐỐI tránh câu hỏi trống" in he_thong
+    # Tắt PR chủ động -> không tiêm dịch vụ nữa
+    _dat_cai_dat(bot_chu_dong_pr=False)
+    r2 = client.post("/api/zalo/mock/nhan-tin-nhan", json={
+        "external_id": "pr-60-2", "customer_external_id": "khach-pr-60b",
+        "customer_name": "Khách PR B", "content": "alo shop ơi"}, headers=headers())
+    assert r2.json()["tra_loi"]
+    assert "Dịch vụ PR 60 Alpha" not in captured["messages"][0]["content"]
+    _dat_cai_dat(bot_chu_dong_pr=True, so_dich_vu_pr=5)
+    _dat_provider_mac_dinh_theo_ten("Mock AI (mô phỏng)")
+
+
+def test_61_bo_nho_dai_han_tu_tom_tat_va_tiem_vao_prompt(monkeypatch):
+    _dat_provider_mac_dinh_theo_ten("Mock AI (mô phỏng)")
+    _dat_cai_dat(bo_nho_tom_tat_sau_bao_nhieu_tin=3)
+    cac_tin = [
+        "mình là khách nhớ 61, mình thích hải sản tươi sống lắm",
+        "nhà mình ở đà nẵng, cuối tuần hay đi ăn cùng gia đình",
+        "cuối tuần này còn bàn cho 6 người không shop",
+    ]
+    for i, nd in enumerate(cac_tin):
+        r = client.post("/api/zalo/mock/nhan-tin-nhan", json={
+            "external_id": f"nho-61-{i}", "customer_external_id": "khach-nho-61",
+            "customer_name": "Khách Nhớ 61", "content": nd}, headers=headers())
+        assert r.json()["tra_loi"], r.text
+    kh = [c for c in client.get("/api/khach-hang", headers=headers()).json() if c["external_id"] == "khach-nho-61"][0]
+    assert kh["memory_summary"] and "hải sản" in kh["memory_summary"]  # đủ 3 tin -> đã tóm tắt (đường Mock)
+    tom_tat_dau = kh["memory_summary"]
+    # Mới 1 tin nữa (< ngưỡng 3) -> KHÔNG tóm tắt lại quá sớm
+    client.post("/api/zalo/mock/nhan-tin-nhan", json={
+        "external_id": "nho-61-3", "customer_external_id": "khach-nho-61",
+        "customer_name": "Khách Nhớ 61", "content": "cảm ơn shop nhé"}, headers=headers())
+    kh2 = client.get(f"/api/khach-hang/{kh['id']}", headers=headers()).json()
+    assert kh2["memory_summary"] == tom_tat_dau
+    # Lượt sau với provider thật: hồ sơ khách được tiêm vào system prompt
+    _dat_provider_mac_dinh_theo_ten("Provider stream test")
+    captured = _bat_payload(monkeypatch)
+    r5 = client.post("/api/zalo/mock/nhan-tin-nhan", json={
+        "external_id": "nho-61-4", "customer_external_id": "khach-nho-61",
+        "customer_name": "Khách Nhớ 61", "content": "thế cuối tuần này mình đặt bàn nhé"}, headers=headers())
+    assert r5.json()["tra_loi"]
+    he_thong = captured["messages"][0]["content"]
+    assert "HỒ SƠ KHÁCH" in he_thong and "hải sản" in he_thong
+    _dat_provider_mac_dinh_theo_ten("Mock AI (mô phỏng)")
+    _dat_cai_dat(bo_nho_tom_tat_sau_bao_nhieu_tin=6)
+
+
+def test_62_tom_tat_tay_va_sua_tay_ho_so():
+    _dat_provider_mac_dinh_theo_ten("Mock AI (mô phỏng)")
+    kh = [c for c in client.get("/api/khach-hang", headers=headers()).json() if c["external_id"] == "khach-nho-61"][0]
+    # Tóm tắt lại ngay bằng tay qua API
+    r = client.post(f"/api/khach-hang/{kh['id']}/tom-tat-bo-nho", headers=headers())
+    assert r.status_code == 200 and r.json()["memory_summary"], r.text
+    # Admin sửa tay hồ sơ -> lưu được và GET thấy đúng
+    noi_dung_sua = "HỒ SƠ SỬA TAY 62: khách VIP, thích chỗ yên tĩnh, hay đi ăn cuối tuần."
+    r2 = client.put(f"/api/khach-hang/{kh['id']}", json={"memory_summary": noi_dung_sua}, headers=headers())
+    assert r2.status_code == 200 and r2.json()["memory_summary"] == noi_dung_sua, r2.text
+    kh2 = client.get(f"/api/khach-hang/{kh['id']}", headers=headers()).json()
+    assert kh2["memory_summary"] == noi_dung_sua
 
 
 def test_55_cai_dat_co_hieu_luc_ngay_tu_khoa_cam():
