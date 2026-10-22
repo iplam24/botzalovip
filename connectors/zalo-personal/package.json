@@ -5,7 +5,14 @@
   "description": "Dịch vụ phụ (sidecar) kết nối Zalo cá nhân bằng thư viện không chính thức zca-js - chỉ chạy local, không commit session/credentials",
   "type": "module",
   "main": "src/index.js",
-  "scripts": { "start": "node src/index.js" },
-  "dependencies": { "zca-js": "^2.0.0" },
-  "engines": { "node": ">=18" }
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "https-proxy-agent": "^9.1.0",
+    "zca-js": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
 }

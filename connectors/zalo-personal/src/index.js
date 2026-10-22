@@ -41,6 +41,22 @@ try {
   state = { ...state, trang_thai: "chua_cai_thu_vien", thong_bao: libError };
 }
 
+// Môi trường máy này bắt buộc ra Internet qua proxy HTTP (biến *_PROXY).
+// fetch() của Node tự dùng proxy qua NODE_USE_ENV_PROXY, nhưng WebSocket (gói `ws`)
+// thì không — kết nối wss trực tiếp bị chặn sẽ lỗi EPROTO "wrong version number".
+// zca-js cho truyền `agent` qua Options: dùng HttpsProxyAgent bọc qua proxy (CONNECT tunnel).
+// TUYỆT ĐỐI không ghi URL proxy vào log (URL chứa thông tin xác thực của proxy).
+let proxyAgent = null;
+try {
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.ALL_PROXY || process.env.all_proxy || process.env.HTTP_PROXY || process.env.http_proxy || "";
+  if (proxyUrl) {
+    const { HttpsProxyAgent } = await import("https-proxy-agent");
+    proxyAgent = new HttpsProxyAgent(proxyUrl);
+    console.log("Đã bật proxy agent cho WebSocket Zalo (không ghi địa chỉ proxy)");
+  }
+} catch { proxyAgent = null; }
+function createZalo() { return proxyAgent ? new ZaloCtor({ agent: proxyAgent }) : new ZaloCtor(); }
+
 function saveFile600(file, data) {
   fs.writeFileSync(file, data);
   try { fs.chmodSync(file, 0o600); } catch {}
@@ -71,9 +87,16 @@ function startListener() {
   try {
     api.listener.on("message", (msg) => { forwardMessage(msg).catch(() => {}); });
     api.listener.on("closed", () => { state = { ...state, trang_thai: "mat_ket_noi", thong_bao: "Kết nối Zalo đã đóng" }; });
-    api.listener.start();
-  } catch { /* listener không khả dụng trong bản thư viện hiện tại */ }
+    // Bắt buộc có handler "error": thiếu nó, lỗi WebSocket của zca-js sẽ ném
+    // ERR_UNHANDLED_ERROR làm sập cả tiến trình (đã xảy ra thật 22/10/2026 ngay sau khi đăng nhập thành công).
+    api.listener.on("error", (err) => { console.error("Lỗi listener Zalo (đã bắt, dịch vụ vẫn chạy):", err?.message || err); });
+    api.listener.on("disconnected", (code, reason) => { console.error(`Listener Zalo ngắt kết nối: ${code} ${reason || ""}`); });
+    api.listener.start({ retryOnClose: true });
+  } catch (e) { console.error("Không khởi động được listener Zalo:", e?.message || e); }
 }
+
+// Mạng phòng thủ cuối: lỗi không bắt được ở tầng WebSocket không được làm sập dịch vụ.
+process.on("uncaughtException", (err) => { console.error("Lỗi không bắt được (dịch vụ vẫn chạy):", err?.message || err); });
 
 async function loginQR(res) {
   if (!ZaloCtor) return send(res, 501, { trang_thai: "chua_cai_thu_vien", thong_bao: libError });
@@ -81,7 +104,7 @@ async function loginQR(res) {
   state = { ...state, trang_thai: "cho_quet", thong_bao: "Đang tạo mã QR, hãy quét bằng ứng dụng Zalo", qr_base64: "" };
   send(res, 200, { ...publicState(), dang_tao_qr: true });
   try {
-    const zalo = new ZaloCtor();
+    const zalo = createZalo();
     // zca-js: loginQR(options, callback sự kiện QR). Callback xử lý chung các dạng sự kiện đã biết.
     // LoginQRCallbackEventType của zca-js 2.x là enum số: 0=QRCodeGenerated,
     // 1=QRCodeExpired, 2=QRCodeScanned, 3=QRCodeDeclined, 4=GotLoginInfo.
@@ -136,7 +159,7 @@ async function tryRestore() {
   if (!ZaloCtor || !fs.existsSync(credPath)) return;
   try {
     const credentials = JSON.parse(fs.readFileSync(credPath, "utf8"));
-    const zalo = new ZaloCtor();
+    const zalo = createZalo();
     api = await zalo.login(credentials);
     state = { ...state, trang_thai: "da_ket_noi", thong_bao: "Đã khôi phục phiên đăng nhập từ dữ liệu local" };
     startListener();

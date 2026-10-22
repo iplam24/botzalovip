@@ -17,6 +17,15 @@ for r in [auth.router, ai_providers.router, customers.router, conversations.rout
 
 def seed():
     Base.metadata.create_all(bind=engine)
+    # Nâng cấp nhẹ cho DB đã tồn tại: thêm cột channel vào conversations nếu chưa có
+    try:
+        from sqlalchemy import inspect, text
+        cols = [c["name"] for c in inspect(engine).get_columns("conversations")]
+        if "channel" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE conversations ADD COLUMN channel VARCHAR DEFAULT 'mo_phong'"))
+    except Exception:
+        pass
     db = SessionLocal()
     try:
         if not db.query(User).filter(User.email == settings.admin_email).first():

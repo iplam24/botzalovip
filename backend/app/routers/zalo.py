@@ -55,4 +55,4 @@ async def webhook_ca_nhan(req: Request, db: Session = Depends(get_db), x_connect
     content = body.get("content") or body.get("message") or body.get("text") or ""
     if not external_id or not content:
         raise HTTPException(400, "Thiếu external_id hoặc nội dung tin nhắn")
-    return process_inbound(db, str(external_id), str(customer_external_id), str(customer_name), str(content), body.get("zalo_account_id"))
+    return process_inbound(db, str(external_id), str(customer_external_id), str(customer_name), str(content), body.get("zalo_account_id"), channel="ca_nhan")

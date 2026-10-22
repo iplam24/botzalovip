@@ -53,8 +53,17 @@ def transfer(cid:int, db: Session = Depends(get_db), u: User = Depends(get_curre
 def send(cid:int, data: SendMessageIn, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     c=db.get(Conversation,cid)
     if not c: raise HTTPException(404,"Không tìm thấy")
-    m=Message(conversation_id=cid, sender_type=data.sender_type, content=data.content, status="da_gui"); db.add(m); db.commit(); db.refresh(m)
-    return {"id": m.id, "content": m.content, "sender_type": m.sender_type, "status": m.status, "created_at": str(m.created_at) if m.created_at else ""}
+    # Hội thoại kênh cá nhân: gửi THẬT qua sidecar Zalo, lỗi thì ghi loi_gui chứ không giả da_gui
+    status="da_gui"; error=""
+    if getattr(c, "channel", "mo_phong") == "ca_nhan" and data.sender_type in ("bot", "nhan_vien"):
+        from ..services.zalo_connector import ZaloPersonalConnector
+        cust = c.customer
+        try:
+            ZaloPersonalConnector().send_text(str(cust.external_id), data.content)
+        except Exception as e:
+            status="loi_gui"; error=str(e)
+    m=Message(conversation_id=cid, sender_type=data.sender_type, content=data.content, status=status, error=error); db.add(m); db.commit(); db.refresh(m)
+    return {"id": m.id, "content": m.content, "sender_type": m.sender_type, "status": m.status, "error": m.error, "created_at": str(m.created_at) if m.created_at else ""}
 
 @router.post("/{cid}/doi-trang-thai")
 def doi_trang_thai(cid: int, payload: dict, db: Session = Depends(get_db), u: User = Depends(get_current_user)):

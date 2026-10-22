@@ -10,9 +10,9 @@ from sqlalchemy.exc import IntegrityError
 from ..models import Customer, Conversation, Message, SystemLog, ServiceItem
 from .text_utils import classify_intent, normalize_vi
 from . import knowledge_service, memory_service, ai_gateway, automation_service
-from .zalo_connector import mock_connector
+from .zalo_connector import mock_connector, ZaloPersonalConnector
 
-def process_inbound(db: Session, external_id: str, customer_external_id: str, customer_name: str, content: str, zalo_account_id=None):
+def process_inbound(db: Session, external_id: str, customer_external_id: str, customer_name: str, content: str, zalo_account_id=None, channel: str = "mo_phong"):
     trace = str(uuid.uuid4())[:8]
     # Dedup trước khi tạo
     if external_id and db.query(Message).filter(Message.external_id == external_id).first():
@@ -23,7 +23,10 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
         cust = Customer(external_id=customer_external_id, display_name=customer_name); db.add(cust); db.commit(); db.refresh(cust)
     conv = db.query(Conversation).filter(Conversation.customer_id == cust.id).order_by(Conversation.created_at.desc()).first()
     if not conv or conv.status == "da_giai_quyet":
-        conv = Conversation(customer_id=cust.id, zalo_account_id=zalo_account_id); db.add(conv); db.commit(); db.refresh(conv)
+        conv = Conversation(customer_id=cust.id, zalo_account_id=zalo_account_id, channel=channel); db.add(conv); db.commit(); db.refresh(conv)
+    elif getattr(conv, "channel", None) != channel:
+        # Hội thoại cũ tạo từ kênh khác: cập nhật theo nguồn tin mới nhất
+        conv.channel = channel; db.commit()
     msg = Message(conversation_id=conv.id, external_id=external_id, sender_type="khach", content=content, status="da_nhan")
     db.add(msg)
     try: db.commit()
@@ -40,7 +43,7 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
     rule = automation_service.evaluate_rules(db, conv, content, intent)
     if rule:
         if rule.action_type == "tra_loi" and rule.action_value:
-            return _send_reply(db, conv, cust, rule.action_value, trace, rule=rule)
+            return _send_reply(db, conv, cust, rule.action_value, trace, rule=rule, channel=channel)
         if rule.action_type == "gan_nhan":
             conv.labels = (conv.labels + "," + rule.action_value).strip(","); db.commit()
         if rule.action_type == "chuyen_nhan_vien":
@@ -61,12 +64,21 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
         db.add(SystemLog(level="error", module="orchestrator", message=f"Lỗi AI: {e}", trace_id=trace)); db.commit()
         return {"trung": False, "trace_id": trace, "tra_loi": None, "ly_do": f"loi_provider: {e}", "conversation_id": conv.id, "customer_id": cust.id}
     # Policy check đơn giản: không hứa hẹn ngoài dữ liệu - nếu không có nguồn và câu hỏi giá thì vẫn trả lời mẫu 'chưa đủ thông tin' từ mock
-    return _send_reply(db, conv, cust, reply, trace, chunks=chunks, model_used=model_used, intent=intent)
+    return _send_reply(db, conv, cust, reply, trace, chunks=chunks, model_used=model_used, intent=intent, channel=channel)
 
-def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=None, intent=""):
-    try: mock_connector.send_text(str(conv.id), reply)
+def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=None, intent="", channel="mo_phong"):
+    # Chọn connector theo kênh THẬT của hội thoại. Bản trước luôn gửi qua Mock
+    # nên tin từ Zalo cá nhân không bao giờ tới được khách (đã xảy ra thật 22/10/2026).
+    try:
+        if channel == "ca_nhan":
+            # thread của zca-js với khách 1-1 chính là external_id của khách
+            ZaloPersonalConnector().send_text(str(cust.external_id), reply)
+        else:
+            mock_connector.send_text(str(conv.id), reply)
     except Exception as e:
-        db.add(SystemLog(level="error", module="zalo", message=f"Lỗi gửi tin: {e}", trace_id=trace)); db.commit()
+        out = Message(conversation_id=conv.id, external_id=None, sender_type="bot", content=reply, status="loi_gui", error=str(e))
+        db.add(out)
+        db.add(SystemLog(level="error", module="zalo", message=f"Lỗi gửi tin qua kênh {channel}: {e}", trace_id=trace)); db.commit()
         return {"trung": False, "trace_id": trace, "tra_loi": None, "ly_do": f"loi_connector: {e}", "conversation_id": conv.id, "customer_id": cust.id}
     out = Message(conversation_id=conv.id, external_id=None, sender_type="bot", content=reply, status="da_gui")
     db.add(out); db.commit()

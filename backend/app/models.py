@@ -45,6 +45,7 @@ class Conversation(Base):
     __tablename__ = "conversations"
     id = Column(Integer, primary_key=True); customer_id = Column(Integer, ForeignKey("customers.id"), index=True)
     zalo_account_id = Column(Integer, ForeignKey("zalo_accounts.id"), nullable=True)
+    channel = Column(String, default="mo_phong")  # mo_phong | ca_nhan | oa - quyết định connector gửi thật
     status = Column(String, default="dang_xu_ly")  # dang_xu_ly, da_giai_quyet, cho_phan_hoi
     bot_enabled = Column(Boolean, default=True); human_takeover = Column(Boolean, default=False)
     requires_approval = Column(Boolean, default=False); labels = Column(String, default="")

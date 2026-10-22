@@ -300,3 +300,31 @@ def test_30_http_client_chiu_no_proxy_ipv6_hong(monkeypatch):
         assert c1 is not None
     with http_client(timeout=5, local=True) as c2:
         assert c2 is not None
+
+def test_31_webhook_ca_nhan_gui_that_qua_connector_ca_nhan(monkeypatch):
+    # Hồi quy lỗi thật 22/10/2026: tin Zalo cá nhân chỉ được gửi qua Mock nên khách không nhận được.
+    from app.services import orchestrator
+    sent = []
+    class FakePersonal:
+        def send_text(self, thread_id, text):
+            sent.append((thread_id, text)); return {"thanh_cong": True}
+    monkeypatch.setattr(orchestrator, "ZaloPersonalConnector", lambda: FakePersonal())
+    payload = {"external_id": "wh-cn-001", "customer_external_id": "khach-ca-nhan-1", "customer_name": "Khách Cá Nhân", "content": "xin chào shop"}
+    r = client.post("/api/zalo/webhook/ca-nhan", json=payload)
+    assert r.status_code == 200 and r.json().get("tra_loi")
+    assert sent and sent[0][0] == "khach-ca-nhan-1"  # gửi đúng thread của khách qua connector cá nhân
+
+def test_32_gui_that_thatbai_ghi_loi_gui(monkeypatch):
+    from app.services import orchestrator
+    class FakePersonalLoi:
+        def send_text(self, thread_id, text): raise RuntimeError("sidecar tat")
+    monkeypatch.setattr(orchestrator, "ZaloPersonalConnector", lambda: FakePersonalLoi())
+    payload = {"external_id": "wh-cn-002", "customer_external_id": "khach-ca-nhan-2", "customer_name": "Khách Lỗi", "content": "alo alo"}
+    r = client.post("/api/zalo/webhook/ca-nhan", json=payload)
+    j = r.json(); assert r.status_code == 200 and j.get("tra_loi") is None and "loi_connector" in str(j.get("ly_do", ""))
+    from app.database import SessionLocal
+    from app.models import Message
+    db = SessionLocal()
+    bot_msgs = db.query(Message).filter(Message.sender_type == "bot").order_by(Message.id.desc()).limit(3).all()
+    assert any(m.status == "loi_gui" for m in bot_msgs)
+    db.close()
