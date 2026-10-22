@@ -10,7 +10,20 @@ from ..services.zalo_connector import MockZaloConnector, ZaloOAStubConnector, Za
 router = APIRouter(prefix="/api/zalo", tags=["Tài khoản Zalo"])
 @router.get("/tai-khoan")
 def list_a(db: Session = Depends(get_db), u: User = Depends(get_current_user)):
-    return [{"id": a.id, "name": a.name, "account_type": a.account_type, "status": a.status, "last_error": a.last_error} for a in db.query(ZaloAccount).all()]
+    # Trạng thái tài khoản cá nhân phải lấy TRỰC TIẾP từ sidecar mỗi lần xem,
+    # không dùng trạng thái tĩnh đã seed trong DB (từng hiển thị sai "chua_ket_noi" khi đã kết nối).
+    ket_qua = []
+    for a in db.query(ZaloAccount).all():
+        trang_thai, loi = a.status, a.last_error
+        if a.account_type == "ca_nhan":
+            try:
+                s = ZaloPersonalConnector().status()
+                trang_thai = s.get("trang_thai", trang_thai)
+                loi = "" if trang_thai == "da_ket_noi" else (s.get("thong_bao", "") or loi)
+            except Exception:
+                pass
+        ket_qua.append({"id": a.id, "name": a.name, "account_type": a.account_type, "status": trang_thai, "last_error": loi})
+    return ket_qua
 @router.post("/mock/nhan-tin-nhan")
 def mock_inbound(data: InboundIn, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     return process_inbound(db, data.external_id, data.customer_external_id, data.customer_name, data.content,
