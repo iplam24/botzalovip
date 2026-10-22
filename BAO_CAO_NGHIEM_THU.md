@@ -105,3 +105,8 @@ Mọi trang đều gọi API thật, có trạng thái đang tải / chưa có d
 
 ### Quét bí mật
 - Đã grep toàn repo (ngoài node_modules/.venv/.git) theo `sk-`, `ghp_`: chỉ còn các chuỗi kiểm thử giả trong test (`sk-secret-khong-that`, `khoa-test-khong-that`...) và khóa mẫu đã redact trong `.env.example` — không có khóa thật nào trong mã nguồn.
+
+## Cập nhật đợt 3 (kiểm chứng bởi main agent, 22/10/2026)
+- Sửa 2 lỗi môi trường thật trong AI Gateway: httpx lỗi "Invalid port" do NO_PROXY chứa IPv6 [::1] và lỗi xác minh chứng chỉ khi có proxy MITM. Gateway nay dùng `http_client()` (proxy tường minh, tôn trọng SSL_CERT_FILE, dịch vụ nội bộ đi trực tiếp) + test hồi quy test_30. Tổng test: **30 passed**.
+- Smoke test provider THẬT qua chính API của Hub (DB tạm, không lưu key): đăng nhập 200 → tạo provider model `code` (key chỉ hiện masked) → `kiem-tra` = **da_ket_noi / Kết nối thành công** → Trung tâm kiểm thử AI trả lời đúng danh tính đã khóa ("em là trợ lý hỗ trợ khách hàng của doanh nghiệp"), model thực tế phía provider được ghi nhận tự động.
+- Đã đẩy lên GitHub: https://github.com/iplam24/botzalovip (nhánh main). Remote không chứa token, repo không chứa secret (đã quét).
