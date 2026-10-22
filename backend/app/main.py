@@ -30,12 +30,15 @@ def seed():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE customers ADD COLUMN email VARCHAR DEFAULT ''"))
         # Đợt nâng cấp 2: users.username (đăng nhập chỉ bằng username) + last_login_at
+        # Mỗi cột một giao dịch riêng; dùng TIMESTAMP (hợp lệ cả PostgreSQL lẫn SQLite,
+        # DATETIME chỉ có ở SQLite/MySQL — từng gây lỗi khởi động trên Postgres thật).
         user_cols = [c["name"] for c in insp.get_columns("users")]
-        with engine.begin() as conn:
-            if "username" not in user_cols:
+        if "username" not in user_cols:
+            with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR"))
-            if "last_login_at" not in user_cols:
-                conn.execute(text("ALTER TABLE users ADD COLUMN last_login_at DATETIME"))
+        if "last_login_at" not in user_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP"))
         try:
             with engine.begin() as conn:
                 conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)"))
