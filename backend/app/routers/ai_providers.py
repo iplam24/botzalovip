@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import AIProviderConfig, User
-from ..schemas import ProviderIn, ProviderUpdate
+from ..schemas import ProviderIn, ProviderUpdate, BatTatIn
 from ..security import encrypt_secret, mask_secret
 from ..deps import get_current_user, require_admin
 from ..services.ai_gateway import test_provider
@@ -24,10 +24,28 @@ def get_p(pid: int, db: Session = Depends(get_db), u: User = Depends(get_current
 def update_p(pid: int, data: ProviderUpdate, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     p = db.get(AIProviderConfig, pid)
     if not p: raise HTTPException(404, "Không tìm thấy")
-    for k, v in data.model_dump(exclude_unset=True).items():
+    du_lieu = data.model_dump(exclude_unset=True)
+    # Nhất quán với PATCH bat-tat: không cho tắt provider đang là mặc định
+    if du_lieu.get("is_active") is False and p.is_default and p.is_active:
+        raise HTTPException(400, "Không thể tắt nhà cung cấp đang là mặc định. Hãy chọn nhà cung cấp khác làm mặc định trước.")
+    for k, v in du_lieu.items():
         if k=="api_key": p.api_key_encrypted = encrypt_secret(v)
         elif k=="is_default" and v: db.query(AIProviderConfig).update({"is_default": False}); p.is_default=True
         else: setattr(p, k, v)
+    db.commit(); db.refresh(p); return out(p)
+@router.patch("/{pid}/bat-tat")
+def bat_tat_p(pid: int, data: BatTatIn, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
+    """Bật/tắt nhanh provider ngay tại danh sách (mục 9.1).
+
+    Provider đang tắt KHÔNG được dùng khi gửi tin (ai_gateway.get_default_provider
+    chỉ chọn provider đang bật). Tắt provider đang là mặc định -> 400, yêu cầu
+    chọn mặc định khác trước (tránh hệ thống mất provider chính âm thầm).
+    """
+    p = db.get(AIProviderConfig, pid)
+    if not p: raise HTTPException(404, "Không tìm thấy")
+    if data.is_active is False and p.is_default and p.is_active:
+        raise HTTPException(400, "Không thể tắt nhà cung cấp đang là mặc định. Hãy chọn nhà cung cấp khác làm mặc định trước.")
+    p.is_active = data.is_active
     db.commit(); db.refresh(p); return out(p)
 @router.delete("/{pid}")
 def delete_p(pid: int, db: Session = Depends(get_db), admin: User = Depends(require_admin)):

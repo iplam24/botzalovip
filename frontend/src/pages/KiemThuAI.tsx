@@ -118,7 +118,7 @@ export default function KiemThuAI() {
                   {ketQua.nguon.map((n: any) => (
                     <div key={n.chunk_id} className="border rounded p-3 text-sm">
                       <div className="flex justify-between gap-2">
-                        <span className="font-medium">📄 {n.title}</span>
+                        <span className="font-medium"><i className="fa-regular fa-file-lines mr-1.5 text-gray-400" />{n.title}</span>
                         <span className="text-gray-500">Điểm: {n.score}</span>
                       </div>
                       <p className="text-gray-600 dark:text-gray-300 mt-1 whitespace-pre-wrap">{n.content}</p>

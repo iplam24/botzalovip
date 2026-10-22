@@ -79,12 +79,12 @@ export default function ThongBao() {
   };
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang
         tieuDe="Thông báo"
         moTa={`Sự kiện quan trọng hệ thống ghi nhận cho quản trị viên. Hiện có ${soChuaDoc} thông báo chưa đọc.`}
       >
-        <Nut mau="xam" onClick={danhDauTatCa} disabled={soChuaDoc === 0}>Đánh dấu tất cả đã đọc</Nut>
+        <Nut mau="xam" onClick={danhDauTatCa} disabled={soChuaDoc === 0}><i className="fa-solid fa-check-double mr-2" />Đánh dấu tất cả đã đọc</Nut>
         <Nut mau="xam" onClick={tai}>Tải lại</Nut>
       </TieuDeTrang>
       {thongBao && <HopThongBao loai={thongBao.loai}>{thongBao.text}</HopThongBao>}

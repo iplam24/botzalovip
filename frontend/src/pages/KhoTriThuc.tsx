@@ -107,9 +107,9 @@ export default function KhoTriThuc() {
   };
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang tieuDe="Kho tri thức" moTa="Bot chỉ trả lời dựa trên dữ liệu đã nhập tại đây — không hard-code giá hay chính sách trong mã nguồn.">
-        <Nut onClick={moThem}>+ Nhập tài liệu văn bản</Nut>
+        <Nut onClick={moThem}><i className="fa-solid fa-plus mr-2" />Nhập tài liệu văn bản</Nut>
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
 
@@ -135,7 +135,7 @@ export default function KhoTriThuc() {
               ketQua.map((k) => (
                 <div key={k.chunk_id} className="border rounded p-3">
                   <div className="flex flex-wrap justify-between gap-2 text-sm">
-                    <span className="font-medium">📄 {k.title}</span>
+                    <span className="font-medium"><i className="fa-regular fa-file-lines mr-1.5 text-gray-400" />{k.title}</span>
                     <span className="text-gray-500">Điểm liên quan: <b>{k.score}</b> · Đoạn #{k.chunk_id}</span>
                   </div>
                   <p className="text-sm text-gray-700 dark:text-gray-200 mt-1.5 whitespace-pre-wrap">{k.content}</p>

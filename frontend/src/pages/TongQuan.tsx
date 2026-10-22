@@ -40,7 +40,7 @@ export default function TongQuan({ diToi }: { diToi?: (tenTrang: string) => void
   const provider = tongQuan?.nha_cung_cap_mac_dinh;
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang tieuDe="Tổng quan" moTa="Số liệu thật từ cơ sở dữ liệu hệ thống, không dùng số liệu mẫu.">
         <Nut mau="xam" onClick={tai} disabled={dangTai}>{dangTai ? "Đang tải..." : "Làm mới"}</Nut>
       </TieuDeTrang>

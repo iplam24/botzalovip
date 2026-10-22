@@ -6,7 +6,7 @@ from ..schemas import SendMessageIn
 from ..deps import get_current_user
 router = APIRouter(prefix="/api/hoi-thoai", tags=["Hội thoại"])
 def out(c, db=None):
-    d = {"id": c.id, "customer_id": c.customer_id, "status": c.status, "bot_enabled": c.bot_enabled, "human_takeover": c.human_takeover, "labels": c.labels, "priority": c.priority, "assignee": c.assignee, "created_at": str(c.created_at) if c.created_at else "", "updated_at": str(c.updated_at) if c.updated_at else ""}
+    d = {"id": c.id, "customer_id": c.customer_id, "status": c.status, "channel": getattr(c, "channel", "mo_phong"), "bot_enabled": c.bot_enabled, "human_takeover": c.human_takeover, "labels": c.labels, "priority": c.priority, "assignee": c.assignee, "created_at": str(c.created_at) if c.created_at else "", "updated_at": str(c.updated_at) if c.updated_at else ""}
     if getattr(c, "customer", None):
         d["customer_name"] = c.customer.display_name or ""
         d["customer_phone"] = c.customer.phone or ""
@@ -19,14 +19,22 @@ def out(c, db=None):
         d["message_count"] = db.query(Message).filter(Message.conversation_id == c.id).count()
     return d
 @router.get("")
-def list_c(trang_thai: str = "", tu_khoa: str = "", db: Session = Depends(get_db), u: User = Depends(get_current_user)):
+def list_c(trang_thai: str = "", tu_khoa: str = "", loc_tin: str = "", db: Session = Depends(get_db), u: User = Depends(get_current_user)):
+    """Danh sách hội thoại — sắp xếp theo HOẠT ĐỘNG GẦN NHẤT (tin cuối mới nhất
+    lên đầu, hội thoại chưa có tin xếp theo thời gian cập nhật). loc_tin:
+    'da_nhan_tin' (>= 1 tin) | 'chua_nhan_tin' (0 tin) — mục 9.2."""
     q = db.query(Conversation)
     if trang_thai: q = q.filter(Conversation.status == trang_thai)
     ds = q.order_by(Conversation.id.desc()).all()
     ket_qua = [out(c, db) for c in ds]
+    if loc_tin == "da_nhan_tin":
+        ket_qua = [c for c in ket_qua if (c.get("message_count") or 0) >= 1]
+    elif loc_tin == "chua_nhan_tin":
+        ket_qua = [c for c in ket_qua if (c.get("message_count") or 0) == 0]
     if tu_khoa:
         tk = tu_khoa.lower()
         ket_qua = [c for c in ket_qua if tk in (c.get("customer_name","") + " " + c.get("last_message","")).lower()]
+    ket_qua.sort(key=lambda c: (c.get("last_message_at") or "", c.get("updated_at") or ""), reverse=True)
     return ket_qua
 @router.get("/{cid}")
 def get_c(cid:int, db: Session = Depends(get_db), u: User = Depends(get_current_user)):

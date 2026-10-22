@@ -144,9 +144,9 @@ export default function QuyTacTuDongHoa() {
   };
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang tieuDe="Quy tắc tự động hóa" moTa="Quy tắc được xét theo thứ tự ưu tiên tăng dần khi có tin nhắn đến. Mọi lần chạy đều ghi lại để kiểm tra.">
-        <Nut onClick={moThem}>+ Tạo quy tắc</Nut>
+        <Nut onClick={moThem}><i className="fa-solid fa-plus mr-2" />Tạo quy tắc</Nut>
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
 
@@ -216,7 +216,7 @@ export default function QuyTacTuDongHoa() {
           <Truong nhan="Mô tả">
             <input className={oNhap} value={form.description} onChange={dat("description")} placeholder="Mục đích của quy tắc (không bắt buộc)" />
           </Truong>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Truong nhan="Loại điều kiện">
               <select className={oNhap} value={form.condition_type} onChange={dat("condition_type")}>
                 {Object.entries(NHAN_DIEU_KIEN).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -227,7 +227,7 @@ export default function QuyTacTuDongHoa() {
                 placeholder={form.condition_type === "intent" ? "Ví dụ: gap_nhan_vien" : form.condition_type === "nhan" ? "Ví dụ: Khách ưu tiên" : "Ví dụ: xin chào"} />
             </Truong>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Truong nhan="Hành động">
               <select className={oNhap} value={form.action_type} onChange={dat("action_type")}>
                 {Object.entries(NHAN_HANH_DONG).map(([k, v]) => <option key={k} value={k}>{v}</option>)}

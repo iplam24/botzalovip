@@ -89,9 +89,9 @@ export default function PhanTich() {
   const khongCoDuLieu = (d?.tong_tin_nhan ?? 0) === 0 && (d?.luot_goi_ai ?? 0) === 0;
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang tieuDe="Phân tích và thống kê" moTa="Báo cáo tính từ dữ liệu thật đã lưu. Chi phí AI là ước tính theo số token nhà cung cấp trả về, không phải hóa đơn thanh toán.">
-        <Nut onClick={xuatCsv} disabled={dangXuat}>{dangXuat ? "Đang xuất..." : "Xuất báo cáo CSV"}</Nut>
+        <Nut onClick={xuatCsv} disabled={dangXuat}><i className="fa-solid fa-file-csv mr-2" />{dangXuat ? "Đang xuất..." : "Xuất báo cáo CSV"}</Nut>
         <Nut mau="xam" onClick={tai}>Làm mới</Nut>
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}

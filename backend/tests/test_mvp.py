@@ -17,7 +17,8 @@ seed()
 client = TestClient(app)
 
 def auth():
-    r = client.post("/api/auth/login", json={"email": "admin@local", "password": "Admin@12345"})
+    # Đợt nâng cấp 2: đăng nhập CHỈ bằng username (không mật khẩu)
+    r = client.post("/api/auth/login", json={"username": "admin"})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 H = None
@@ -28,7 +29,9 @@ def headers():
 
 # 1. Đăng nhập thành công + /me
 def test_01_login():
-    h = headers(); r = client.get("/api/auth/me", headers=h); assert r.status_code == 200 and r.json()["email"] == "admin@local"
+    h = headers(); r = client.get("/api/auth/me", headers=h)
+    assert r.status_code == 200 and r.json()["email"] == "admin@local" and r.json()["username"] == "admin"
+    assert r.json()["last_login_at"]  # đã ghi lần đăng nhập cuối khi đăng nhập bằng username
 
 # 2+3. Provider + masked key + lưu bền vững
 def test_02_provider_masked():
@@ -136,7 +139,9 @@ def test_15_sao_luu_khoi_phuc():
 # Phân quyền: user thường không xóa được, không thấy full key
 def test_16_phan_quyen():
     client.post("/api/auth/nguoi-dung", json={"email": "nv@test.local", "password": "Nv@12345", "role": "NhanVien"}, headers=headers())
-    login = client.post("/api/auth/login", json={"email": "nv@test.local", "password": "Nv@12345"})
+    # Username tự suy từ email khi tạo mà không truyền username -> "nv@test.local"
+    login = client.post("/api/auth/login", json={"username": "nv@test.local"})
+    assert login.status_code == 200, login.text
     nh = {"Authorization": f"Bearer {login.json()['access_token']}"}
     lst = client.get("/api/ai-providers", headers=nh); assert "sk-secret" not in lst.text
     kh = client.get("/api/khach-hang", headers=nh).json()

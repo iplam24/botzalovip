@@ -9,9 +9,13 @@ def now(): return datetime.now(timezone.utc)
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True); email = Column(String, unique=True, index=True, nullable=False)
+    # Đợt nâng cấp 2: đăng nhập CHỈ bằng username (duy nhất). Cột mật khẩu vẫn
+    # giữ trong DB (không kiểm tra khi đăng nhập nữa) để sau này bật lại được.
+    username = Column(String, unique=True, index=True, nullable=True)
     hashed_password = Column(String, nullable=False); full_name = Column(String, default="")
     role = Column(String, default="NhanVien")  # QuanTriVienCaoNhat, QuanTriVien, QuanLy, NhanVien, ChiXem
     is_active = Column(Boolean, default=True); created_at = Column(DateTime, default=now)
+    last_login_at = Column(DateTime, nullable=True)
 
 class AIProviderConfig(Base):
     __tablename__ = "ai_providers"
@@ -166,6 +170,21 @@ class Notification(Base):
     is_read = Column(Boolean, default=False, index=True)
     sent_via_zalo = Column(Boolean, default=False)
     created_at = Column(DateTime, default=now)
+
+class PhanBoBanBe(Base):
+    """Phân bổ bạn bè Zalo cho nhân viên phụ trách (Đợt nâng cấp 2, mục 9.5).
+
+    Dữ liệu bạn bè được đồng bộ từ sidecar zca-js (getAllFriends thật).
+    Đồng bộ chỉ upsert tên/avatar — KHÔNG xóa phân bổ admin đã gán.
+    """
+    __tablename__ = "phan_bo_ban_be"
+    id = Column(Integer, primary_key=True)
+    zalo_friend_id = Column(String, unique=True, index=True, nullable=False)
+    ten_hien_thi = Column(String, default=""); avatar_url = Column(String, default="")
+    admin_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    ghi_chu = Column(Text, default="")
+    created_at = Column(DateTime, default=now); updated_at = Column(DateTime, default=now, onupdate=now)
+    admin = relationship("User")
 
 class BackupRecord(Base):
     __tablename__ = "backups"

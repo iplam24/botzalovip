@@ -1,2 +1,104 @@
-@tailwind base; @tailwind components; @tailwind utilities;
-body{font-family:system-ui,sans-serif}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Màu thương hiệu mặc định — App ghi đè bằng cài đặt mau_chu_dao_giao_dien */
+  --mau-chu-dao: #0068ff;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: "Be Vietnam Pro", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Chuyển trang/tab nhẹ (150-200ms) */
+@keyframes xuatHienTrang {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.trang-hien-tai {
+  animation: xuatHienTrang 180ms ease-out;
+}
+
+@keyframes toastVao {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.toast-muc {
+  animation: toastVao 160ms ease-out;
+}
+
+/* Skeleton loading */
+@keyframes nhapNhaySkeleton {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.skeleton {
+  animation: nhapNhaySkeleton 1.3s ease-in-out infinite;
+  background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+  background-size: 200% 100%;
+  border-radius: 0.5rem;
+}
+
+/* Nút gạt (toggle switch) dùng chung — điều khiển bằng checkbox ẩn */
+.nut-gat {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  flex: none;
+  cursor: pointer;
+}
+.nut-gat input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.nut-gat .duong-ray {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background 160ms ease;
+}
+.nut-gat .duong-ray::before {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: 3px;
+  top: 3px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 160ms ease;
+}
+.nut-gat input:checked + .duong-ray {
+  background: var(--mau-chu-dao);
+}
+.nut-gat input:checked + .duong-ray::before {
+  transform: translateX(18px);
+}
+.nut-gat input:disabled + .duong-ray {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Thanh cuộn mảnh cho danh sách dài */
+.cuon-dep::-webkit-scrollbar { width: 8px; height: 8px; }
+.cuon-dep::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+.cuon-dep::-webkit-scrollbar-track { background: transparent; }
+
+/* Vùng chạm thân thiện trên mobile */
+@media (max-width: 768px) {
+  button, a, input, select, textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+}

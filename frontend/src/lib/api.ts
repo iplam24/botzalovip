@@ -50,13 +50,21 @@ export function taiBlobXuong(blob: Blob, tenFile: string) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-export const dangNhap = async (email: string, password: string) => {
+// Đợt nâng cấp 2: đăng nhập nội bộ CHỈ bằng tên đăng nhập (username), không mật khẩu.
+export const dangNhap = async (username: string) => {
   const r = await fetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ username }),
   });
-  if (!r.ok) throw new Error("Email hoặc mật khẩu không đúng");
+  if (!r.ok) {
+    let chiTiet = "Tên đăng nhập không đúng hoặc tài khoản đã bị khóa";
+    try {
+      const j = await r.json();
+      if (j.detail) chiTiet = j.detail;
+    } catch { /* giữ thông báo mặc định */ }
+    throw new Error(chiTiet);
+  }
   const d = await r.json();
   localStorage.setItem("token", d.access_token);
   return d;

@@ -62,13 +62,55 @@ function saveFile600(file, data) {
   try { fs.chmodSync(file, 0o600); } catch {}
 }
 
+// Thông tin tài khoản đang đăng nhập (phục vụ hiển thị "tài khoản đang liên kết"
+// và logic nhóm: backend cần UID của chính bot để nhận diện mention đích danh).
+let thongTinTaiKhoan = { tai_khoan_id: "", ten_tai_khoan: "", avatar_url: "", phien_bat_dau_luc: null };
+
+async function capNhatThongTinTaiKhoan() {
+  if (!api) return;
+  try {
+    if (typeof api.getOwnId === "function") {
+      const ownId = api.getOwnId();
+      if (ownId) thongTinTaiKhoan.tai_khoan_id = String(ownId);
+    }
+  } catch {}
+  try {
+    if (typeof api.fetchAccountInfo === "function") {
+      const info = await api.fetchAccountInfo();
+      const profile = info?.profile || info || {};
+      if (profile.userId) thongTinTaiKhoan.tai_khoan_id = String(profile.userId);
+      thongTinTaiKhoan.ten_tai_khoan = String(profile.displayName || profile.zaloName || "");
+      thongTinTaiKhoan.avatar_url = String(profile.avatar || "");
+    }
+  } catch {}
+  thongTinTaiKhoan.phien_bat_dau_luc = new Date().toISOString();
+}
+
 async function forwardMessage(msg) {
+  // Tin do CHÍNH tài khoản bot gửi (isSelf) không chuyển về backend:
+  // tránh bot tự xử lý tin của mình (vòng lặp) trong cả chat 1-1 lẫn nhóm.
+  if (msg?.isSelf) return;
   // Chỉ chuyển các trường nghiệp vụ cần thiết, không chuyển credentials/session.
+  // Cấu trúc thật của zca-js: msg.type là ThreadType (0 = User, 1 = Group),
+  // msg.threadId, msg.data.{msgId, cliMsgId, uidFrom, dName, content},
+  // riêng tin nhóm có msg.data.mentions: [{uid, pos, len, type}].
+  const loaiThread = typeof msg?.type === "number" ? msg.type : 0;
+  const laNhom = loaiThread === 1;
+  const mentions = laNhom && Array.isArray(msg?.data?.mentions)
+    ? msg.data.mentions.map((m) => ({ uid: String(m?.uid ?? ""), pos: m?.pos ?? 0, len: m?.len ?? 0, type: m?.type ?? 0 }))
+    : [];
   const payload = {
     external_id: String(msg?.data?.msgId || msg?.data?.cliMsgId || msg?.msgId || Date.now()),
     customer_external_id: String(msg?.threadId || msg?.data?.uidFrom || ""),
     customer_name: String(msg?.data?.dName || "Khách Zalo cá nhân"),
     content: typeof msg?.data?.content === "string" ? msg.data.content : "",
+    // Trường nhóm (Đợt nâng cấp 2 mục 7): backend quyết định trả lời hay im lặng.
+    la_nhom: laNhom,
+    loai_thread: loaiThread,
+    mentions,
+    nguoi_gui_id: String(msg?.data?.uidFrom || ""),
+    cli_msg_id: String(msg?.data?.cliMsgId || ""),
+    bot_uid: thongTinTaiKhoan.tai_khoan_id || "",
   };
   if (!payload.content) return;
   try {
@@ -136,6 +178,7 @@ async function loginQR(res) {
       state.qr_updated_at = new Date().toISOString();
     }
     state = { ...state, trang_thai: "da_ket_noi", thong_bao: "Đã kết nối Zalo cá nhân" };
+    await capNhatThongTinTaiKhoan();
     startListener();
   } catch (e) {
     state = { ...state, trang_thai: "mat_ket_noi", thong_bao: `Đăng nhập QR thất bại: ${e?.message || "lỗi không rõ"}` };
@@ -143,7 +186,10 @@ async function loginQR(res) {
 }
 
 function publicState() {
-  return { trang_thai: state.trang_thai, thong_bao: state.thong_bao, qr_base64: state.qr_base64 || "", qr_duong_dan: state.qr_base64 ? "/qr.png" : "", qr_updated_at: state.qr_updated_at, moi_truong: "ca_nhan_sidecar", canh_bao: "Thư viện không chính thức, có rủi ro bị Zalo hạn chế/khóa tài khoản" };
+  return { trang_thai: state.trang_thai, thong_bao: state.thong_bao, qr_base64: state.qr_base64 || "", qr_duong_dan: state.qr_base64 ? "/qr.png" : "", qr_updated_at: state.qr_updated_at, moi_truong: "ca_nhan_sidecar", canh_bao: "Thư viện không chính thức, có rủi ro bị Zalo hạn chế/khóa tài khoản",
+    // Tài khoản đang liên kết (mục 9.4): lấy thật từ getOwnId/fetchAccountInfo của zca-js
+    tai_khoan_id: thongTinTaiKhoan.tai_khoan_id, ten_tai_khoan: thongTinTaiKhoan.ten_tai_khoan,
+    avatar_url: thongTinTaiKhoan.avatar_url, phien_bat_dau_luc: thongTinTaiKhoan.phien_bat_dau_luc };
 }
 function send(res, code, obj) { const b = JSON.stringify(obj); res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" }); res.end(b); }
 function readBody(req) { return new Promise((resolve) => { let d = ""; req.on("data", (c) => (d += c)); req.on("end", () => { try { resolve(JSON.parse(d || "{}")); } catch { resolve({}); } }); }); }
@@ -162,6 +208,7 @@ async function tryRestore() {
     const zalo = createZalo();
     api = await zalo.login(credentials);
     state = { ...state, trang_thai: "da_ket_noi", thong_bao: "Đã khôi phục phiên đăng nhập từ dữ liệu local" };
+    await capNhatThongTinTaiKhoan();
     startListener();
   } catch {
     state = { ...state, trang_thai: "chua_dang_nhap", thong_bao: "Phiên cũ không còn hợp lệ, hãy đăng nhập lại bằng mã QR" };
@@ -197,8 +244,62 @@ const server = http.createServer(async (req, res) => {
       if (typeof fn !== "function") return send(res, 501, { thong_bao: "Thư viện zca-js hiện tại không hỗ trợ thả cảm xúc (không có addReaction)" });
       const b = await readBody(req);
       const dest = { data: { msgId: String(b.message_id || ""), cliMsgId: String(b.cli_msg_id || b.message_id || "") }, threadId: String(b.thread_id || ""), type: b.thread_type ?? 0 };
-      await fn.call(api, b.icon || "HEART", dest);
+      // zca-js nhận icon theo GIÁ TRỊ enum Reactions (vd HEART = "/-heart"), không phải tên enum
+      const ICON_MAP = { HEART: "/-heart", LIKE: "/-strong", HAHA: ":>", WOW: ":o", CRY: ":-(( ", ANGRY: ":-h" };
+      const icon = ICON_MAP[b.icon] || b.icon || "/-heart";
+      await fn.call(api, icon, dest);
       return send(res, 200, { thanh_cong: true });
+    }
+    if (req.method === "POST" && url.pathname === "/tha-tim") {
+      // Thả tim (Đợt nâng cấp 2 mục 4): zca-js CÓ addReaction thật
+      // (đã kiểm chứng trong dist/apis/addReaction.js, icon Reactions.HEART = "/-heart").
+      if (!requireApi(res)) return;
+      if (typeof api.addReaction !== "function") return send(res, 501, { thong_bao: "Thư viện zca-js hiện tại không hỗ trợ thả cảm xúc (không có addReaction)" });
+      const b = await readBody(req);
+      if (!b.thread_id || !b.message_id) return send(res, 400, { thong_bao: "Thiếu thread_id hoặc message_id" });
+      const dest = {
+        data: { msgId: String(b.message_id), cliMsgId: String(b.cli_msg_id || b.message_id) },
+        threadId: String(b.thread_id),
+        type: b.loai_thread ?? b.thread_type ?? 0, // ThreadType: 0 = User, 1 = Group
+      };
+      await api.addReaction("/-heart", dest);
+      return send(res, 200, { thanh_cong: true });
+    }
+    if (req.method === "POST" && url.pathname === "/dang-soan-tin") {
+      // Hiệu ứng "đang soạn tin": zca-js có sendTypingEvent thật.
+      if (!requireApi(res)) return;
+      if (typeof api.sendTypingEvent !== "function") return send(res, 501, { thong_bao: "Thư viện zca-js hiện tại không hỗ trợ hiệu ứng đang soạn tin (không có sendTypingEvent)" });
+      const b = await readBody(req);
+      if (!b.thread_id) return send(res, 400, { thong_bao: "Thiếu thread_id" });
+      await api.sendTypingEvent(String(b.thread_id), b.loai_thread ?? b.thread_type ?? 0);
+      return send(res, 200, { thanh_cong: true });
+    }
+    if (req.method === "GET" && url.pathname === "/ban-be") {
+      // Danh sách bạn bè THẬT qua zca-js getAllFriends (mục 9.5) — không chế dữ liệu.
+      if (!requireApi(res)) return;
+      if (typeof api.getAllFriends !== "function") return send(res, 501, { thong_bao: "Thư viện zca-js hiện tại không hỗ trợ lấy danh sách bạn bè (không có getAllFriends)" });
+      const friends = await api.getAllFriends();
+      const ban_be = (Array.isArray(friends) ? friends : []).map((f) => ({
+        id: String(f?.userId || f?.uid || ""),
+        ten_hien_thi: String(f?.displayName || f?.zaloName || ""),
+        avatar_url: String(f?.avatar || ""),
+      })).filter((f) => f.id);
+      return send(res, 200, { ban_be });
+    }
+    if (req.method === "POST" && url.pathname === "/ngat-lien-ket") {
+      // Ngắt LIÊN KẾT hẳn (mục 9.4): dừng listener + XÓA credentials đã lưu.
+      // zca-js không có API logout phía server Zalo — thao tác này ngắt phiên
+      // local thật: muốn kết nối lại phải quét QR và đăng nhập lại từ đầu.
+      try { api?.listener?.stop?.(); } catch {}
+      api = null;
+      try {
+        const credPath = path.join(DATA_DIR, "credentials.json");
+        if (fs.existsSync(credPath)) fs.unlinkSync(credPath);
+        if (fs.existsSync(QR_PATH)) fs.unlinkSync(QR_PATH);
+      } catch {}
+      thongTinTaiKhoan = { tai_khoan_id: "", ten_tai_khoan: "", avatar_url: "", phien_bat_dau_luc: null };
+      state = { trang_thai: "chua_dang_nhap", thong_bao: "Đã ngắt liên kết và xóa phiên đăng nhập đã lưu", qr_base64: "", qr_updated_at: null };
+      return send(res, 200, publicState());
     }
     if (req.method === "POST" && url.pathname === "/gui-sticker") {
       if (!requireApi(res)) return;

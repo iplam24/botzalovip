@@ -43,7 +43,7 @@ export default function NhatKyHeThong() {
   const dsModule = useMemo(() => Array.from(new Set(ds.map((l) => l.module).filter(Boolean))), [ds]);
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang tieuDe="Nhật ký hệ thống" moTa="Ghi nhận sự kiện quan trọng theo thời gian. Khóa API, mật khẩu và thông tin xác thực không bao giờ được ghi vào nhật ký.">
         <Nut mau="xam" onClick={tai}>Làm mới</Nut>
       </TieuDeTrang>

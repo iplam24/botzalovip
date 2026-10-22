@@ -7,12 +7,12 @@ from .models import User, AIProviderConfig, ZaloAccount, SystemLog
 from .security import hash_password, encrypt_secret
 import os
 from .config import settings
-from .routers import auth, ai_providers, customers, conversations, services_router, knowledge, memories, automation, zalo, logs_analytics, backup, ai_test, cai_dat, notifications
+from .routers import auth, ai_providers, customers, conversations, services_router, knowledge, memories, automation, zalo, logs_analytics, backup, ai_test, cai_dat, notifications, ban_be
 
 app = FastAPI(title="Zalo AI Hub", description="Nền tảng AI tự động hóa Zalo - giao diện và API tiếng Việt", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://localhost:3000"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-for r in [auth.router, ai_providers.router, customers.router, conversations.router, services_router.router, knowledge.router, memories.router, automation.router, zalo.router, logs_analytics.router, backup.router, ai_test.router, cai_dat.router, notifications.router]:
+for r in [auth.router, ai_providers.router, customers.router, conversations.router, services_router.router, knowledge.router, memories.router, automation.router, zalo.router, logs_analytics.router, backup.router, ai_test.router, cai_dat.router, notifications.router, ban_be.router]:
     app.include_router(r)
 
 def seed():
@@ -29,12 +29,40 @@ def seed():
         if "email" not in cust_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE customers ADD COLUMN email VARCHAR DEFAULT ''"))
+        # Đợt nâng cấp 2: users.username (đăng nhập chỉ bằng username) + last_login_at
+        user_cols = [c["name"] for c in insp.get_columns("users")]
+        with engine.begin() as conn:
+            if "username" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR"))
+            if "last_login_at" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN last_login_at DATETIME"))
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)"))
+        except Exception:
+            pass
     except Exception:
         pass
     db = SessionLocal()
     try:
-        if not db.query(User).filter(User.email == settings.admin_email).first():
-            db.add(User(email=settings.admin_email, hashed_password=hash_password(settings.admin_password), full_name="Quản trị viên", role="QuanTriVienCaoNhat")); db.commit()
+        admin = db.query(User).filter(User.email == settings.admin_email).first()
+        if not admin:
+            db.add(User(email=settings.admin_email, username="admin", hashed_password=hash_password(settings.admin_password), full_name="Quản trị viên", role="QuanTriVienCaoNhat")); db.commit()
+            admin = db.query(User).filter(User.email == settings.admin_email).first()
+        # Gán username "admin" cho tài khoản quản trị đã tồn tại từ trước (migration nhẹ)
+        if admin and not getattr(admin, "username", None):
+            admin.username = "admin"; db.commit()
+        # Người dùng cũ chưa có username: lấy phần trước @ của email làm username tạm
+        try:
+            for u in db.query(User).filter(User.username == None).all():  # noqa: E711
+                co_so = (u.email or f"user{u.id}").split("@")[0] or f"user{u.id}"
+                ung_vien, dem = co_so, 1
+                while db.query(User).filter(User.username == ung_vien, User.id != u.id).first():
+                    dem += 1; ung_vien = f"{co_so}{dem}"
+                u.username = ung_vien
+            db.commit()
+        except Exception:
+            db.rollback()
         if not db.query(AIProviderConfig).filter(AIProviderConfig.provider == "mock").first():
             db.add(AIProviderConfig(name="Mock AI (mô phỏng)", provider="mock", model="mock-model", api_key_encrypted=encrypt_secret("mock-key-123456"), is_default=True, status="da_ket_noi")); db.commit()
         # Cấu hình mẫu LAM Token - code: KHÔNG hard-code khóa API.

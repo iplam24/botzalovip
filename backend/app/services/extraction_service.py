@@ -135,21 +135,46 @@ def _la_trung_lien_tiep(db: Session, customer_id: int, field: str, value: str) -
     return bool(gan_nhat and (gan_nhat.value or "") == value)
 
 
-def kiem_tra_du_thong_tin(db: Session, customer: Customer) -> bool:
-    """Đủ bộ tối thiểu: có SĐT và có nhu cầu hoặc dịch vụ quan tâm."""
-    co_sdt = bool((customer.phone or "").strip()) or (
-        db.query(CollectedInfo)
-        .filter(CollectedInfo.customer_id == customer.id, CollectedInfo.field == "so_dien_thoai")
-        .first() is not None
-    )
-    if not co_sdt:
-        return False
+def _co_truong(db: Session, customer: Customer, truong: str) -> bool:
+    if truong == "so_dien_thoai":
+        return bool((customer.phone or "").strip()) or (
+            db.query(CollectedInfo)
+            .filter(CollectedInfo.customer_id == customer.id, CollectedInfo.field == "so_dien_thoai")
+            .first() is not None)
+    if truong == "email":
+        return bool((customer.email or "").strip()) or (
+            db.query(CollectedInfo)
+            .filter(CollectedInfo.customer_id == customer.id, CollectedInfo.field == "email")
+            .first() is not None)
+    if truong == "ho_ten":
+        return bool((customer.display_name or "").strip()) or (
+            db.query(CollectedInfo)
+            .filter(CollectedInfo.customer_id == customer.id, CollectedInfo.field == "ho_ten")
+            .first() is not None)
     return (
         db.query(CollectedInfo)
-        .filter(CollectedInfo.customer_id == customer.id,
-                CollectedInfo.field.in_(["nhu_cau", "dich_vu_quan_tam"]))
-        .first() is not None
-    )
+        .filter(CollectedInfo.customer_id == customer.id, CollectedInfo.field == truong)
+        .first() is not None)
+
+
+def kiem_tra_du_thong_tin(db: Session, customer: Customer) -> bool:
+    """Đủ thông tin = có đủ các trường bắt buộc trong Cài đặt
+    (cac_truong_bat_buoc_thu_thap, mặc định "so_dien_thoai,nhu_cau").
+
+    Tương thích ngược: nếu Cài đặt không đọc được thì dùng bộ tối thiểu cũ —
+    có SĐT và có nhu cầu hoặc dịch vụ quan tâm.
+    """
+    bat_buoc = None
+    try:
+        from ..routers.cai_dat import doc_cai_dat
+        tho = str(doc_cai_dat(db).get("cac_truong_bat_buoc_thu_thap") or "")
+        bat_buoc = [t.strip() for t in tho.split(",") if t.strip() in CAC_TRUONG]
+    except Exception:
+        bat_buoc = None
+    if not bat_buoc:
+        return _co_truong(db, customer, "so_dien_thoai") and (
+            _co_truong(db, customer, "nhu_cau") or _co_truong(db, customer, "dich_vu_quan_tam"))
+    return all(_co_truong(db, customer, t) for t in bat_buoc)
 
 
 def extract_and_save(db: Session, customer: Customer, message: Message) -> dict:

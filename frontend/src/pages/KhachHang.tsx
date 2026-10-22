@@ -3,6 +3,7 @@ import { api, apiTaiFile, dinhDangThoiGian, taiBlobXuong } from "../lib/api";
 import {
   ChuaCoDuLieu, DangTai, HopBieuMau, HopXacNhan, LoiTai, Nut, ThongBao, TieuDeTrang, Truong, oNhap,
 } from "../components/dungChung";
+import { useToast } from "../components/Toast";
 
 // Nhãn tiếng Việt cho các trường thông tin thu thập tự động (GĐ mở rộng 1)
 const NHAN_TRUONG_THU_THAP: Record<string, string> = {
@@ -171,6 +172,7 @@ function BangThongTinThuThap({ khach, baoLoi }: { khach: any; baoLoi: (text: str
 const FORM_TRONG = { display_name: "", phone: "", labels: "", group_name: "", notes: "", assignee: "", external_id: "" };
 
 export default function KhachHang() {
+  const toast = useToast();
   const [ds, setDs] = useState<any[]>([]);
   const [dangTai, setDangTai] = useState(true);
   const [loi, setLoi] = useState("");
@@ -220,13 +222,13 @@ export default function KhachHang() {
     try {
       if (dangSua) {
         await api(`/api/khach-hang/${dangSua.id}`, { method: "PUT", body: JSON.stringify(form) });
-        setThongBao({ loai: "thanh_cong", text: `Đã cập nhật khách hàng “${form.display_name}”.` });
+        toast.thanhCong(`Đã cập nhật khách hàng “${form.display_name}”.`);
       } else {
         await api("/api/khach-hang", {
           method: "POST",
           body: JSON.stringify({ ...form, external_id: form.external_id || null }),
         });
-        setThongBao({ loai: "thanh_cong", text: `Đã thêm khách hàng “${form.display_name}”.` });
+        toast.thanhCong(`Đã thêm khách hàng “${form.display_name}”.`);
       }
       setMoForm(false);
       await tai();
@@ -242,7 +244,7 @@ export default function KhachHang() {
     setDangXoa(true);
     try {
       await api(`/api/khach-hang/${xoaId}`, { method: "DELETE" });
-      setThongBao({ loai: "thanh_cong", text: "Đã xóa khách hàng." });
+      toast.thanhCong("Đã xóa khách hàng.");
       setXoaId(null);
       await tai();
     } catch (e: any) {
@@ -261,7 +263,7 @@ export default function KhachHang() {
       const thamSo = tuKhoa.trim() ? `?tu_khoa=${encodeURIComponent(tuKhoa.trim())}` : "";
       const { blob, tenFile } = await apiTaiFile(`/api/khach-hang/xuat-excel${thamSo}`);
       taiBlobXuong(blob, tenFile);
-      setThongBao({ loai: "thanh_cong", text: "Đã xuất danh sách khách hàng ra Excel (kèm thông tin thu thập chính)." });
+      toast.thanhCong("Đã xuất danh sách khách hàng ra Excel (kèm thông tin thu thập chính).");
     } catch (e: any) {
       setThongBao({ loai: "loi", text: `Xuất Excel thất bại: ${e.message}` });
     } finally {
@@ -270,10 +272,12 @@ export default function KhachHang() {
   };
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang tieuDe="Khách hàng" moTa="Hồ sơ khách hàng thống nhất từ mọi kênh hội thoại. Không tự suy đoán thuộc tính nhạy cảm.">
-        <Nut mau="xam" onClick={xuatExcel} disabled={dangXuat}>{dangXuat ? "Đang xuất..." : "Xuất Excel"}</Nut>
-        <Nut onClick={moThem}>+ Thêm khách hàng</Nut>
+        <Nut mau="xam" onClick={xuatExcel} disabled={dangXuat}>
+          <i className="fa-solid fa-file-excel mr-2" />{dangXuat ? "Đang xuất..." : "Xuất Excel"}
+        </Nut>
+        <Nut onClick={moThem}><i className="fa-solid fa-plus mr-2" />Thêm khách hàng</Nut>
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
 
@@ -331,7 +335,7 @@ export default function KhachHang() {
           <Truong nhan="Tên hiển thị" batBuoc>
             <input className={oNhap} value={form.display_name} onChange={dat("display_name")} required placeholder="Ví dụ: Nguyễn Văn A" />
           </Truong>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Truong nhan="Số điện thoại">
               <input className={oNhap} value={form.phone} onChange={dat("phone")} placeholder="09xx xxx xxx" />
             </Truong>
@@ -339,7 +343,7 @@ export default function KhachHang() {
               <input className={oNhap} value={form.external_id} onChange={dat("external_id")} placeholder="Mã người dùng Zalo" />
             </Truong>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Truong nhan="Nhãn (phân cách bằng dấu phẩy)">
               <input className={oNhap} value={form.labels} onChange={dat("labels")} placeholder="Khách mới, Đang tư vấn" />
             </Truong>

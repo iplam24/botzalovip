@@ -132,9 +132,9 @@ export default function BoNhoAI() {
     setForm((f: any) => ({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang tieuDe="Bộ nhớ AI" moTa="Ký ức dài hạn có nguồn, độ tin cậy và trạng thái xác minh. Chỉ ký ức liên quan mới được đưa vào ngữ cảnh trả lời.">
-        <Nut onClick={moThem}>+ Thêm ký ức</Nut>
+        <Nut onClick={moThem}><i className="fa-solid fa-plus mr-2" />Thêm ký ức</Nut>
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
 
@@ -170,7 +170,7 @@ export default function BoNhoAI() {
                 {ds.map((m) => (
                   <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-neutral-800 align-top">
                     <td className="p-3 border-b max-w-md">
-                      {m.pinned && <span className="mr-1" title="Đã ghim">📌</span>}
+                      {m.pinned && <span className="mr-1 text-thuongHieu-600" title="Đã ghim"><i className="fa-solid fa-thumbtack" /></span>}
                       <span className="whitespace-pre-wrap">{m.content}</span>
                     </td>
                     <td className="p-3 border-b whitespace-nowrap">{NHAN_LOAI_KY_UC[m.memory_type] || m.memory_type}</td>
@@ -188,7 +188,7 @@ export default function BoNhoAI() {
                       <button className="text-blue-600 hover:underline mr-3" onClick={() => moSua(m)}>Sửa</button>
                       <button className="text-red-600 hover:underline" onClick={() => setXoaId(m.id)}>Xóa</button>
                       <span className={`block text-xs mt-1 ${m.verified ? "text-green-700" : "text-gray-400"}`}>
-                        {m.verified ? "✓ Đã xác minh" : "Chưa xác minh"}
+                        {m.verified ? "Đã xác minh" : "Chưa xác minh"}
                       </span>
                     </td>
                   </tr>
@@ -205,7 +205,7 @@ export default function BoNhoAI() {
             <textarea className={oNhap} rows={4} value={form.content} onChange={dat("content")} required
               placeholder="Chỉ ghi sự kiện/dữ kiện có cơ sở — không ghi suy đoán như sự thật" />
           </Truong>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Truong nhan="Loại ký ức">
               <select className={oNhap} value={form.memory_type} onChange={dat("memory_type")}>
                 {Object.entries(NHAN_LOAI_KY_UC).map(([k, v]) => <option key={k} value={k}>{v}</option>)}

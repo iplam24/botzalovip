@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, dinhDangThoiGian } from "../lib/api";
-import { DangTai, HuyHieuTrangThai, Nut, ThongBao, TieuDeTrang, oNhap } from "../components/dungChung";
+import { DangTai, HopXacNhan, HuyHieuTrangThai, Nut, ThongBao, TieuDeTrang, oNhap } from "../components/dungChung";
+import { useToast } from "../components/Toast";
 
 // Tài khoản Zalo — 3 khu vực trung thực về khả năng tích hợp:
 // 1) Zalo cá nhân (sidecar zca-js): đăng nhập QR, polling trạng thái mỗi 3 giây.
@@ -25,10 +26,13 @@ const NHAN_LOAI_TK: Record<string, string> = {
 };
 
 export default function TaiKhoanZalo() {
+  const toast = useToast();
   // --- Cá nhân QR ---
   const [tt, setTt] = useState<any>(null);
   const [loiCaNhan, setLoiCaNhan] = useState("");
   const [dangTaoQr, setDangTaoQr] = useState(false);
+  const [moXacNhanNgatLienKet, setMoXacNhanNgatLienKet] = useState(false);
+  const [dangNgatLienKet, setDangNgatLienKet] = useState(false);
   const timer = useRef<any>(null);
 
   const taiTrangThaiCaNhan = useCallback(async () => {
@@ -62,8 +66,24 @@ export default function TaiKhoanZalo() {
   const ngatCaNhan = async () => {
     try {
       setTt(await api("/api/zalo/ca-nhan/ngat-ket-noi", { method: "POST" }));
+      toast.thongTin("Đã ngắt kết nối tạm thời. Phiên đăng nhập vẫn được lưu trong dịch vụ phụ.");
     } catch (e: any) {
       setLoiCaNhan(e.message);
+    }
+  };
+
+  // Ngắt LIÊN KẾT hẳn (mục 9.4): sidecar hỗ trợ thật — dừng phiên + xóa dữ
+  // liệu phiên đã lưu, muốn dùng lại phải quét QR đăng nhập lại từ đầu.
+  const ngatLienKet = async () => {
+    setDangNgatLienKet(true);
+    try {
+      setTt(await api("/api/zalo/ca-nhan/ngat-lien-ket", { method: "POST" }));
+      toast.thanhCong("Đã ngắt liên kết tài khoản Zalo và xóa phiên đăng nhập đã lưu.");
+    } catch (e: any) {
+      toast.loi(e.message);
+    } finally {
+      setDangNgatLienKet(false);
+      setMoXacNhanNgatLienKet(false);
     }
   };
 
@@ -121,7 +141,7 @@ export default function TaiKhoanZalo() {
   const qr = tt?.qr_base64 || "";
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-4 sm:p-6 space-y-5">
       <TieuDeTrang tieuDe="Tài khoản Zalo" moTa="Quản lý các kênh kết nối Zalo. Mỗi kênh ghi rõ trạng thái thật và giới hạn của nó.">
         <Nut mau="xam" onClick={chayKiemTra} disabled={dangKiemTra}>
           {dangKiemTra ? "Đang kiểm tra..." : "Kiểm tra tất cả connector"}
@@ -139,8 +159,8 @@ export default function TaiKhoanZalo() {
       )}
 
       {/* Khu 1: Zalo cá nhân QR */}
-      <div className="bg-yellow-50 border border-yellow-300 text-yellow-900 p-4 rounded">
-        <p className="font-semibold">⚠️ Cảnh báo về Zalo cá nhân (thư viện zca-js — không chính thức)</p>
+      <div className="bg-yellow-50 border border-yellow-300 text-yellow-900 p-4 rounded-xl">
+        <p className="font-semibold"><i className="fa-solid fa-triangle-exclamation mr-2" />Cảnh báo về Zalo cá nhân (thư viện zca-js — không chính thức)</p>
         <p className="text-sm mt-1">
           Kết nối tài khoản cá nhân dùng thư viện <b>không chính thức</b>, không phải API do Zalo cung cấp.
           Việc sử dụng có <b>rủi ro bị Zalo hạn chế hoặc khóa tài khoản</b>. Hệ thống <b>không</b> vượt CAPTCHA/OTP,
@@ -173,17 +193,82 @@ export default function TaiKhoanZalo() {
             <p className="text-sm text-gray-500 mt-2">Mở ứng dụng Zalo trên điện thoại → Quét mã QR → Xác nhận đăng nhập. Trang này tự cập nhật trạng thái mỗi 3 giây.</p>
           </div>
         ) : trangThaiCaNhan === "da_ket_noi" ? (
-          <p className="text-green-700 font-medium my-3">✅ Tài khoản Zalo cá nhân đang kết nối qua dịch vụ phụ. Tin nhắn đến sẽ được chuyển về hệ thống tự động.</p>
+          <p className="text-green-700 font-medium my-3"><i className="fa-solid fa-circle-check mr-2" />Tài khoản Zalo cá nhân đang kết nối qua dịch vụ phụ. Tin nhắn đến sẽ được chuyển về hệ thống tự động.</p>
         ) : (
           <p className="text-sm text-gray-500 my-3">Chưa có mã QR. Bấm “Tạo QR mới” để bắt đầu đăng nhập.</p>
         )}
 
         <div className="flex flex-wrap gap-3">
-          <Nut onClick={taoQr} disabled={dangTaoQr}>{dangTaoQr ? "Đang tạo QR..." : "Tạo QR mới"}</Nut>
-          <Nut mau="do" onClick={ngatCaNhan}>Ngắt kết nối</Nut>
+          <Nut onClick={taoQr} disabled={dangTaoQr}><i className="fa-solid fa-qrcode mr-2" />{dangTaoQr ? "Đang tạo QR..." : "Tạo QR mới"}</Nut>
+          <Nut mau="do" onClick={ngatCaNhan}><i className="fa-solid fa-plug-circle-xmark mr-2" />Ngắt kết nối</Nut>
           <Nut mau="xam" onClick={taiTrangThaiCaNhan}>Kiểm tra trạng thái</Nut>
         </div>
       </section>
+
+      {/* Tài khoản đang liên kết — dữ liệu THẬT từ trạng thái sidecar (mục 9.4).
+          Cấu trúc dạng danh sách để sẵn sàng cho nhiều tài khoản sau này. */}
+      <section className="bg-white dark:bg-neutral-900 p-5 rounded-xl shadow-the">
+        <h2 className="font-bold text-lg mb-1">Tài khoản đang liên kết</h2>
+        <p className="text-sm text-gray-500 mb-3">
+          Thông tin lấy trực tiếp từ dịch vụ phụ Zalo cá nhân (getOwnId / hồ sơ tài khoản của zca-js) — không suy đoán.
+        </p>
+        {(() => {
+          const taiKhoanLienKet = tt && (tt.trang_thai === "da_ket_noi" || tt.tai_khoan_id)
+            ? [{
+                ten: tt.ten_tai_khoan || "Tài khoản Zalo cá nhân",
+                id: tt.tai_khoan_id || "(chưa lấy được ID)",
+                avatar: tt.avatar_url || "",
+                trang_thai: tt.trang_thai,
+                bat_dau: tt.phien_bat_dau_luc,
+              }]
+            : [];
+          if (taiKhoanLienKet.length === 0) {
+            return <p className="text-sm text-gray-500">Hiện chưa có tài khoản Zalo nào đang liên kết. Hãy đăng nhập bằng mã QR ở mục 1 phía trên.</p>;
+          }
+          return (
+            <ul className="divide-y">
+              {taiKhoanLienKet.map((tk, i) => (
+                <li key={i} className="py-3 flex flex-wrap items-center gap-3">
+                  {tk.avatar ? (
+                    <img src={tk.avatar} alt="" className="w-11 h-11 rounded-full object-cover flex-none" />
+                  ) : (
+                    <span className="w-11 h-11 rounded-full bg-gray-200 dark:bg-neutral-700 flex items-center justify-center text-gray-500 flex-none">
+                      <i className="fa-solid fa-user" />
+                    </span>
+                  )}
+                  <div className="flex-1 min-w-[200px]">
+                    <p className="font-medium">{tk.ten}</p>
+                    <p className="text-xs text-gray-500">
+                      ID tài khoản: {tk.id}
+                      {tk.bat_dau && <> · Phiên bắt đầu: {dinhDangThoiGian(tk.bat_dau)}</>}
+                    </p>
+                  </div>
+                  <HuyHieuTrangThai giaTri={tk.trang_thai === "da_ket_noi" ? "da_ket_noi" : tk.trang_thai} />
+                  {tk.trang_thai === "da_ket_noi" && (
+                    <Nut mau="do" onClick={() => setMoXacNhanNgatLienKet(true)}>
+                      <i className="fa-solid fa-link-slash mr-2" />Ngắt liên kết
+                    </Nut>
+                  )}
+                </li>
+              ))}
+            </ul>
+          );
+        })()}
+        <p className="text-xs text-gray-400 mt-2">
+          “Ngắt liên kết” dừng phiên và xóa dữ liệu đăng nhập đã lưu trong dịch vụ phụ (zca-js không có thao tác
+          đăng xuất phía máy chủ Zalo) — muốn kết nối lại phải quét mã QR. Khác với “Ngắt kết nối” ở mục 1 chỉ dừng tạm và giữ phiên.
+        </p>
+      </section>
+
+      <HopXacNhan
+        mo={moXacNhanNgatLienKet}
+        tieuDe="Ngắt liên kết tài khoản Zalo?"
+        noiDung={"Phiên đăng nhập đã lưu trong dịch vụ phụ sẽ bị XÓA. Bot sẽ ngừng nhận/trả lời tin nhắn Zalo cá nhân cho tới khi bạn quét mã QR đăng nhập lại.\n\nNếu chỉ muốn tạm dừng, hãy dùng nút “Ngắt kết nối” ở mục 1."}
+        nhanNut="Ngắt liên kết"
+        dangXuLy={dangNgatLienKet}
+        onDong={() => setMoXacNhanNgatLienKet(false)}
+        onXacNhan={ngatLienKet}
+      />
 
       {/* Khu 2: Mô phỏng */}
       <section className="bg-white dark:bg-neutral-900 p-5 rounded shadow">
@@ -240,7 +325,8 @@ export default function TaiKhoanZalo() {
         {taiKhoan.length === 0 ? (
           <p className="text-sm text-gray-500">Chưa có tài khoản nào trong cơ sở dữ liệu.</p>
         ) : (
-          <table className="min-w-full text-sm">
+          <div className="overflow-x-auto cuon-dep">
+          <table className="min-w-[640px] w-full text-sm">
             <thead>
               <tr className="text-left bg-gray-50 dark:bg-neutral-800">
                 <th className="p-3 border-b">Tên tài khoản</th>
@@ -260,6 +346,7 @@ export default function TaiKhoanZalo() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </div>

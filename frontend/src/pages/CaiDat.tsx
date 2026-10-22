@@ -1,32 +1,48 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import { api } from "../lib/api";
-import { DangTai, LoiTai, Nut, ThongBao, Truong, oNhap } from "../components/dungChung";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, dinhDangThoiGian } from "../lib/api";
+import { DangTai, LoiTai, Nut, NutGat, oNhap } from "../components/dungChung";
+import { useToast } from "../components/Toast";
 
-// Cài đặt hệ thống lưu bền vững trong DB qua /api/cai-dat (cần quyền quản trị viên để lưu).
-// Bao gồm: tự động trả lời toàn cục, thời gian gom tin, chế độ duyệt trước khi gửi,
-// múi giờ, số tin nhắn ngữ cảnh cho AI, tên hiển thị của bot.
-const MUI_GIO = [
-  "Asia/Ho_Chi_Minh",
-  "Asia/Bangkok",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "UTC",
-];
+// Trung tâm cấu hình (Đợt nâng cấp 2 mục 3/10/11.2): giao diện TỰ SINH từ
+// registry cài đặt của backend (GET /api/cai-dat/dang-ky). Mỗi khóa có kiểu
+// riêng (bool -> nút gạt, so/gio -> ô số, select -> danh sách chọn, text,
+// textarea, mau -> ô chọn màu). Lưu theo nhóm / khôi phục mặc định theo nhóm;
+// thay đổi có hiệu lực ngay ở lần xử lý tiếp theo, không cần khởi động lại.
+// Bí mật (khóa API, connector secret) KHÔNG ở đây — nằm ở trang chuyên biệt.
+
+type KhoaCaiDat = {
+  khoa: string; nhom: string; nhan: string; mo_ta: string; kieu: string;
+  mac_dinh: any; gia_tri: any; lua_chon?: string[];
+  nhan_lua_chon?: Record<string, string>; min?: number; max?: number;
+  da_luu_luc?: string | null;
+};
 
 export default function CaiDat() {
-  const [form, setForm] = useState<any>(null);
+  const toast = useToast();
+  const [nhomDs, setNhomDs] = useState<any[]>([]);
+  const [khoaDs, setKhoaDs] = useState<KhoaCaiDat[]>([]);
+  const [giaTri, setGiaTri] = useState<Record<string, any>>({});
+  const [nhomChon, setNhomChon] = useState("hanh_vi_bot");
+  const [timKiem, setTimKiem] = useState("");
   const [dangTai, setDangTai] = useState(true);
   const [loi, setLoi] = useState("");
-  const [dangLuu, setDangLuu] = useState(false);
-  const [thongBao, setThongBao] = useState<{ loai: "thanh_cong" | "loi"; text: string } | null>(null);
+  const [dangLuuNhom, setDangLuuNhom] = useState<string | null>(null);
+  const [luuLuc, setLuuLuc] = useState<Record<string, string>>({});
   const [sucKhoe, setSucKhoe] = useState<any>(null);
 
   const tai = useCallback(async () => {
     setDangTai(true);
     setLoi("");
     try {
-      const [cd, sk] = await Promise.all([api("/api/cai-dat"), fetch("/api/suc-khoe").then((r) => r.json()).catch(() => null)]);
-      setForm(cd);
+      const [dk, sk] = await Promise.all([
+        api("/api/cai-dat/dang-ky"),
+        fetch("/api/suc-khoe").then((r) => r.json()).catch(() => null),
+      ]);
+      setNhomDs(dk.nhom || []);
+      setKhoaDs(dk.cai_dat || []);
+      const gt: Record<string, any> = {};
+      (dk.cai_dat || []).forEach((c: KhoaCaiDat) => { gt[c.khoa] = c.gia_tri; });
+      setGiaTri(gt);
       setSucKhoe(sk);
     } catch (e: any) {
       setLoi(e.message);
@@ -37,150 +53,189 @@ export default function CaiDat() {
 
   useEffect(() => { tai(); }, [tai]);
 
-  const luu = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!form) return;
-    setDangLuu(true);
-    setThongBao(null);
+  const dat = (khoa: string, v: any) => setGiaTri((cu) => ({ ...cu, [khoa]: v }));
+
+  const luuNhom = async (nhomKhoa: string) => {
+    const khoaCuaNhom = khoaDs.filter((c) => c.nhom === nhomKhoa);
+    const body: Record<string, any> = {};
+    khoaCuaNhom.forEach((c) => { body[c.khoa] = giaTri[c.khoa]; });
+    setDangLuuNhom(nhomKhoa);
     try {
-      const kq = await api("/api/cai-dat", {
-        method: "PUT",
-        body: JSON.stringify({
-          tu_dong_tra_loi_toan_cuc: !!form.tu_dong_tra_loi_toan_cuc,
-          thoi_gian_gom_tin_ms: Number(form.thoi_gian_gom_tin_ms) || 0,
-          che_do_duyet_truoc_khi_gui: !!form.che_do_duyet_truoc_khi_gui,
-          mui_gio: form.mui_gio,
-          so_tin_nhan_ngu_canh: Number(form.so_tin_nhan_ngu_canh) || 10,
-          ten_hien_thi_bot: form.ten_hien_thi_bot || "",
-          thong_bao_admin_zalo_thread_id: form.thong_bao_admin_zalo_thread_id || "",
-          thong_bao_khach_moi: !!form.thong_bao_khach_moi,
-          thong_bao_co_so_dien_thoai: !!form.thong_bao_co_so_dien_thoai,
-          thong_bao_du_thong_tin: !!form.thong_bao_du_thong_tin,
-          thong_bao_gap_nhan_vien: !!form.thong_bao_gap_nhan_vien,
-          thong_bao_khieu_nai: !!form.thong_bao_khieu_nai,
-          thong_bao_bot_khong_tra_loi_duoc: !!form.thong_bao_bot_khong_tra_loi_duoc,
-          thong_bao_loi_he_thong: !!form.thong_bao_loi_he_thong,
-        }),
-      });
-      setForm(kq);
-      setThongBao({ loai: "thanh_cong", text: "Đã lưu cài đặt vào cơ sở dữ liệu. Cài đặt có hiệu lực cho các lượt xử lý tiếp theo." });
-    } catch (err: any) {
-      setThongBao({ loai: "loi", text: `Lưu thất bại: ${err.message} (lưu cài đặt yêu cầu quyền quản trị viên)` });
+      const kq = await api("/api/cai-dat", { method: "PUT", body: JSON.stringify(body) });
+      setGiaTri((cu) => ({ ...cu, ...kq }));
+      setLuuLuc((cu) => ({ ...cu, [nhomKhoa]: new Date().toISOString() }));
+      toast.thanhCong(`Đã lưu nhóm “${nhomDs.find((n) => n.khoa_nhom === nhomKhoa)?.ten || nhomKhoa}”. Thay đổi có hiệu lực ngay.`);
+    } catch (e: any) {
+      toast.loi(`Lưu thất bại: ${e.message} (lưu cài đặt yêu cầu quyền quản trị viên)`);
     } finally {
-      setDangLuu(false);
+      setDangLuuNhom(null);
     }
   };
 
-  if (dangTai) return <DangTai />;
-  if (loi || !form) return <LoiTai loi={loi || "Không đọc được cài đặt"} onThuLai={tai} />;
+  const khoiPhucNhom = async (nhomKhoa: string) => {
+    setDangLuuNhom(nhomKhoa);
+    try {
+      await api("/api/cai-dat/khoi-phuc-mac-dinh", { method: "POST", body: JSON.stringify({ nhom: nhomKhoa }) });
+      await tai();
+      toast.thongTin(`Đã khôi phục mặc định cho nhóm “${nhomDs.find((n) => n.khoa_nhom === nhomKhoa)?.ten || nhomKhoa}”.`);
+    } catch (e: any) {
+      toast.loi(`Khôi phục thất bại: ${e.message}`);
+    } finally {
+      setDangLuuNhom(null);
+    }
+  };
 
-  const dat = (k: string) => (e: any) =>
-    setForm((f: any) => ({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
+  const control = (c: KhoaCaiDat) => {
+    const v = giaTri[c.khoa];
+    if (c.kieu === "bool") {
+      return <NutGat bat={!!v} onDoi={(moi) => dat(c.khoa, moi)} nhan={v ? "Đang bật" : "Đang tắt"} />;
+    }
+    if (c.kieu === "so" || c.kieu === "gio") {
+      return (
+        <input className={oNhap} type="number" min={c.min} max={c.max} step={c.khoa === "ai_temperature" ? 0.05 : 1}
+          value={v ?? ""} onChange={(e) => dat(c.khoa, e.target.value === "" ? "" : Number(e.target.value))} />
+      );
+    }
+    if (c.kieu === "select") {
+      return (
+        <select className={oNhap} value={v ?? ""} onChange={(e) => dat(c.khoa, e.target.value)}>
+          {(c.lua_chon || []).map((lc) => (
+            <option key={lc} value={lc}>{c.nhan_lua_chon?.[lc] || lc}</option>
+          ))}
+        </select>
+      );
+    }
+    if (c.kieu === "mau") {
+      return (
+        <div className="flex items-center gap-2">
+          <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(v || "") ? v : "#0068ff"}
+            onChange={(e) => dat(c.khoa, e.target.value)}
+            className="w-11 h-10 rounded border cursor-pointer bg-white flex-none" />
+          <input className={oNhap} value={v || ""} onChange={(e) => dat(c.khoa, e.target.value)} placeholder="#0068ff" />
+        </div>
+      );
+    }
+    if (c.kieu === "textarea") {
+      return (
+        <textarea className={oNhap} rows={3} value={v ?? ""} onChange={(e) => dat(c.khoa, e.target.value)} />
+      );
+    }
+    return <input className={oNhap} value={v ?? ""} onChange={(e) => dat(c.khoa, e.target.value)} />;
+  };
+
+  const khoaTheoNhom = useMemo(() => {
+    const m: Record<string, KhoaCaiDat[]> = {};
+    khoaDs.forEach((c) => { (m[c.nhom] = m[c.nhom] || []).push(c); });
+    return m;
+  }, [khoaDs]);
+
+  const ketQuaTim = useMemo(() => {
+    const tk = timKiem.trim().toLowerCase();
+    if (!tk) return null;
+    return khoaDs.filter((c) =>
+      c.nhan.toLowerCase().includes(tk) || (c.mo_ta || "").toLowerCase().includes(tk) || c.khoa.includes(tk));
+  }, [timKiem, khoaDs]);
+
+  if (dangTai) return <DangTai />;
+  if (loi) return <LoiTai loi={loi} onThuLai={tai} />;
+
+  const nhomHienTai = nhomDs.find((n) => n.khoa_nhom === nhomChon);
+
+  const theKhoa = (c: KhoaCaiDat) => (
+    <div key={c.khoa} className="py-3.5 border-b last:border-b-0 grid md:grid-cols-[1fr_320px] gap-2 md:gap-6 items-start">
+      <div>
+        <p className="text-sm font-medium">{c.nhan}</p>
+        {c.mo_ta && <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{c.mo_ta}</p>}
+        <p className="text-[11px] text-gray-400 mt-1">
+          Khóa: <code>{c.khoa}</code> · Mặc định: <code>{String(c.mac_dinh === "" ? "(trống)" : c.mac_dinh)}</code>
+          {c.da_luu_luc && <> · Đã lưu lúc {dinhDangThoiGian(c.da_luu_luc)}</>}
+        </p>
+      </div>
+      <div>{control(c)}</div>
+    </div>
+  );
 
   return (
-    <div className="p-6 max-w-3xl">
+    <div className="p-4 sm:p-6">
       <h1 className="text-2xl font-bold mb-1">Cài đặt hệ thống</h1>
-      <p className="text-sm text-gray-500 mb-5">
-        Mọi thay đổi được xác thực, lưu bền vững trong cơ sở dữ liệu và áp dụng cho toàn hệ thống.
-        Cài đặt riêng cho AI nằm tại “Nhà cung cấp AI”, riêng cho Zalo nằm tại “Tài khoản Zalo”.
+      <p className="text-sm text-gray-500 mb-5 max-w-3xl">
+        Trung tâm cấu hình toàn diện: mọi thay đổi lưu vào cơ sở dữ liệu và có hiệu lực ngay ở lần xử lý
+        tiếp theo — không cần khởi động lại, không cần sửa mã nguồn. Khóa API và bí mật kết nối không nằm
+        ở đây (xem “Nhà cung cấp AI” và “Tài khoản Zalo”).
       </p>
-      {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
 
-      <form onSubmit={luu} className="space-y-5">
-        <section className="bg-white dark:bg-neutral-900 rounded shadow p-5">
-          <h2 className="font-bold mb-3">Cài đặt hội thoại và tự động hóa</h2>
-          <label className="flex items-start gap-3 mb-4 cursor-pointer">
-            <input type="checkbox" className="mt-1" checked={!!form.tu_dong_tra_loi_toan_cuc} onChange={dat("tu_dong_tra_loi_toan_cuc")} />
-            <span className="text-sm">
-              <b>Tự động trả lời toàn cục</b>
-              <span className="block text-gray-500">Khi tắt, bot không tự trả lời ở mọi hội thoại (vẫn nhận và lưu tin). Có thể bật/tắt riêng từng hội thoại ở trang Hội thoại.</span>
-            </span>
-          </label>
-          <label className="flex items-start gap-3 mb-4 cursor-pointer">
-            <input type="checkbox" className="mt-1" checked={!!form.che_do_duyet_truoc_khi_gui} onChange={dat("che_do_duyet_truoc_khi_gui")} />
-            <span className="text-sm">
-              <b>Chế độ duyệt trước khi gửi</b>
-              <span className="block text-gray-500">Bot chỉ soạn câu trả lời, nhân viên duyệt mới gửi đi. An toàn hơn cho nội dung nhạy cảm.</span>
-            </span>
-          </label>
-          <div className="grid grid-cols-2 gap-4">
-            <Truong nhan="Thời gian gom tin nhắn (mili-giây)">
-              <input className={oNhap} type="number" min={0} max={30000} value={form.thoi_gian_gom_tin_ms} onChange={dat("thoi_gian_gom_tin_ms")} />
-              <span className="text-xs text-gray-400">Chờ gom nhiều tin liên tiếp của khách thành một ngữ cảnh trước khi trả lời. Có giới hạn chờ tối đa để tránh treo.</span>
-            </Truong>
-            <Truong nhan="Số tin nhắn gần nhất đưa vào ngữ cảnh AI">
-              <input className={oNhap} type="number" min={1} max={100} value={form.so_tin_nhan_ngu_canh} onChange={dat("so_tin_nhan_ngu_canh")} />
-              <span className="text-xs text-gray-400">Chỉ đưa số tin liên quan, không nạp toàn bộ lịch sử vào mỗi lần gọi AI.</span>
-            </Truong>
-          </div>
+      <div className="relative max-w-md mb-5">
+        <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" />
+        <input className={`${oNhap} pl-9`} placeholder="Tìm kiếm cài đặt theo tên, mô tả hoặc khóa..."
+          value={timKiem} onChange={(e) => setTimKiem(e.target.value)} />
+      </div>
+
+      {ketQuaTim ? (
+        <section className="bg-white dark:bg-neutral-900 rounded-xl shadow-the p-5 max-w-4xl">
+          <h2 className="font-bold mb-1">Kết quả tìm kiếm ({ketQuaTim.length})</h2>
+          <p className="text-xs text-gray-400 mb-2">Lưu ý: nút Lưu nằm ở từng nhóm bên dưới — hãy xóa từ khóa tìm kiếm để về nhóm tương ứng khi lưu.</p>
+          {ketQuaTim.length === 0
+            ? <p className="text-sm text-gray-500 py-3">Không có cài đặt nào khớp.</p>
+            : ketQuaTim.map(theKhoa)}
         </section>
+      ) : (
+        <div className="grid lg:grid-cols-[260px_1fr] gap-4 items-start max-w-6xl">
+          {/* Menu nhóm có icon Font Awesome */}
+          <aside className="bg-white dark:bg-neutral-900 rounded-xl shadow-the p-2 lg:sticky lg:top-16">
+            <div className="flex lg:flex-col gap-1 overflow-x-auto cuon-dep">
+              {nhomDs.map((n) => (
+                <button key={n.khoa_nhom} onClick={() => setNhomChon(n.khoa_nhom)}
+                  className={`flex items-center gap-2.5 text-left px-3 py-2.5 rounded-lg text-sm whitespace-nowrap transition-colors duration-160 ${
+                    nhomChon === n.khoa_nhom
+                      ? "bg-thuongHieu-50 text-thuongHieu-700 font-medium dark:bg-neutral-800 dark:text-white"
+                      : "hover:bg-gray-50 dark:hover:bg-neutral-800"}`}>
+                  <i className={`${n.icon} w-5 text-center flex-none`} />
+                  <span>{n.ten}</span>
+                  <span className="ml-auto text-[11px] text-gray-400">{(khoaTheoNhom[n.khoa_nhom] || []).length}</span>
+                </button>
+              ))}
+            </div>
+          </aside>
 
-        <section className="bg-white dark:bg-neutral-900 rounded shadow p-5">
-          <h2 className="font-bold mb-3">Cài đặt hiển thị và danh tính bot</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <Truong nhan="Múi giờ hệ thống">
-              <select className={oNhap} value={form.mui_gio} onChange={dat("mui_gio")}>
-                {MUI_GIO.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <span className="text-xs text-gray-400">Mặc định Asia/Ho_Chi_Minh. Định dạng ngày DD/MM/YYYY, tiền tệ VND.</span>
-            </Truong>
-            <Truong nhan="Tên hiển thị của bot">
-              <input className={oNhap} value={form.ten_hien_thi_bot || ""} onChange={dat("ten_hien_thi_bot")}
-                placeholder="Ví dụ: Trợ lý hỗ trợ khách hàng" />
-              <span className="text-xs text-gray-400">Danh tính bot được khóa trong lời nhắc hệ thống — mô hình không tự giới thiệu sai danh tính.</span>
-            </Truong>
-          </div>
-        </section>
-
-        <section className="bg-white dark:bg-neutral-900 rounded shadow p-5">
-          <h2 className="font-bold mb-3">Thông báo cho quản trị viên</h2>
-          <p className="text-sm text-gray-500 mb-4">
-            Thông báo luôn được ghi vào Trung tâm thông báo (mục “Thông báo” + chuông ở thanh trên).
-            Nếu điền ID hội thoại admin, hệ thống còn gửi thêm qua Zalo cá nhân (chỉ với sự kiện từ kênh cá nhân,
-            tối thiểu 60 giây giữa hai lần gửi để chống spam). Tắt từng loại nếu không muốn nhận.
-          </p>
-          <Truong nhan="ID hội thoại Zalo của admin (để trống = không gửi qua Zalo)">
-            <input className={oNhap} value={form.thong_bao_admin_zalo_thread_id || ""}
-              onChange={dat("thong_bao_admin_zalo_thread_id")}
-              placeholder="ID thread Zalo cá nhân của admin" />
-            <span className="text-xs text-gray-400">Là định danh cuộc trò chuyện Zalo mà tài khoản bot dùng để nhắn cho admin.</span>
-          </Truong>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-3">
-            {[
-              ["thong_bao_khach_moi", "Khách hàng mới nhắn tin lần đầu"],
-              ["thong_bao_co_so_dien_thoai", "Khách để lại số điện thoại"],
-              ["thong_bao_du_thong_tin", "Đã thu thập đủ thông tin khách"],
-              ["thong_bao_gap_nhan_vien", "Khách yêu cầu gặp nhân viên"],
-              ["thong_bao_khieu_nai", "Khách có dấu hiệu khiếu nại"],
-              ["thong_bao_bot_khong_tra_loi_duoc", "Bot không trả lời được (lỗi AI)"],
-              ["thong_bao_loi_he_thong", "Lỗi hệ thống / lỗi gửi tin"],
-            ].map(([khoa, nhan]) => (
-              <label key={khoa} className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={!!form[khoa]} onChange={dat(khoa)} />
-                {nhan}
-              </label>
-            ))}
-          </div>
-        </section>
-
-        <section className="bg-white dark:bg-neutral-900 rounded shadow p-5">
-          <h2 className="font-bold mb-2">Sức khỏe hệ thống</h2>
-          <p className="text-sm">
-            Trạng thái qua <code>/api/suc-khoe</code>:{" "}
-            {sucKhoe
-              ? <span className="text-green-700 font-medium">{sucKhoe.trang_thai === "khoe" ? "Đang khỏe" : sucKhoe.trang_thai} — {sucKhoe.dich_vu}</span>
-              : <span className="text-red-600">Không gọi được API sức khỏe</span>}
-          </p>
-          <p className="text-xs text-gray-400 mt-2">
-            Sao lưu dữ liệu tại “Sao lưu và khôi phục”. Đường dẫn dữ liệu, chính sách giữ nhật ký và giới hạn tệp được cấu hình bằng biến môi trường khi triển khai (xem tài liệu hướng dẫn Windows/Linux).
-          </p>
-        </section>
-
-        <div className="flex gap-2">
-          <Nut type="submit" disabled={dangLuu}>{dangLuu ? "Đang lưu..." : "Lưu cài đặt"}</Nut>
-          <Nut mau="xam" onClick={tai}>Tải lại từ máy chủ</Nut>
+          <section className="bg-white dark:bg-neutral-900 rounded-xl shadow-the p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-3 mb-1">
+              <div>
+                <h2 className="font-bold text-lg flex items-center gap-2">
+                  <i className={nhomHienTai?.icon} /> {nhomHienTai?.ten}
+                </h2>
+                {nhomHienTai?.mo_ta && <p className="text-sm text-gray-500 mt-0.5">{nhomHienTai.mo_ta}</p>}
+                {luuLuc[nhomChon] && (
+                  <p className="text-xs text-green-600 mt-1">
+                    <i className="fa-solid fa-circle-check mr-1" />
+                    Đã lưu lúc {dinhDangThoiGian(luuLuc[nhomChon])}
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Nut mau="xam" onClick={() => khoiPhucNhom(nhomChon)} disabled={dangLuuNhom === nhomChon}>
+                  <i className="fa-solid fa-rotate-left mr-1.5" />Khôi phục mặc định
+                </Nut>
+                <Nut onClick={() => luuNhom(nhomChon)} disabled={dangLuuNhom === nhomChon}>
+                  <i className="fa-solid fa-floppy-disk mr-1.5" />
+                  {dangLuuNhom === nhomChon ? "Đang lưu..." : "Lưu nhóm này"}
+                </Nut>
+              </div>
+            </div>
+            {(khoaTheoNhom[nhomChon] || []).map(theKhoa)}
+            {nhomChon === "he_thong" && (
+              <div className="pt-4">
+                <h3 className="font-semibold mb-1">Sức khỏe hệ thống</h3>
+                <p className="text-sm">
+                  Trạng thái qua <code>/api/suc-khoe</code>:{" "}
+                  {sucKhoe
+                    ? <span className="text-green-700 font-medium">{sucKhoe.trang_thai === "khoe" ? "Đang khỏe" : sucKhoe.trang_thai} — {sucKhoe.dich_vu}</span>
+                    : <span className="text-red-600">Không gọi được API sức khỏe</span>}
+                </p>
+              </div>
+            )}
+          </section>
         </div>
-      </form>
+      )}
     </div>
   );
 }

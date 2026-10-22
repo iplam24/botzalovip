@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, dinhDangThoiGian } from "../lib/api";
 import { ChuaCoDuLieu, DangTai, HuyHieuTrangThai, LoiTai, Nut, ThongBao, TieuDeTrang, oNhap } from "../components/dungChung";
+import { useToast } from "../components/Toast";
 
 // Hộp thư hội thoại 2 cột:
 // - Trái: danh sách hội thoại (tên khách, tin gần nhất, trạng thái, bot/nhân viên), tìm kiếm + lọc trạng thái.
@@ -15,11 +16,13 @@ const NHAN_NGUOI_GUI: Record<string, string> = {
 };
 
 export default function HoiThoai() {
+  const toast = useToast();
   const [danhSach, setDanhSach] = useState<any[]>([]);
   const [dangTai, setDangTai] = useState(true);
   const [loi, setLoi] = useState("");
   const [tuKhoa, setTuKhoa] = useState("");
   const [locTrangThai, setLocTrangThai] = useState("");
+  const [locTin, setLocTin] = useState("");
   const [dangChonId, setDangChonId] = useState<number | null>(null);
   const [chiTiet, setChiTiet] = useState<any>(null);
   const [dangTaiChiTiet, setDangTaiChiTiet] = useState(false);
@@ -34,6 +37,7 @@ export default function HoiThoai() {
     try {
       const thamSo = new URLSearchParams();
       if (locTrangThai) thamSo.set("trang_thai", locTrangThai);
+      if (locTin) thamSo.set("loc_tin", locTin);
       if (tuKhoa.trim()) thamSo.set("tu_khoa", tuKhoa.trim());
       const ds = await api(`/api/hoi-thoai?${thamSo.toString()}`);
       setDanhSach(ds);
@@ -44,7 +48,7 @@ export default function HoiThoai() {
       setDangTai(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locTrangThai, tuKhoa]);
+  }, [locTrangThai, locTin, tuKhoa]);
 
   useEffect(() => {
     const t = setTimeout(taiDanhSach, tuKhoa ? 350 : 0);
@@ -74,10 +78,10 @@ export default function HoiThoai() {
     if (dangChonId === null) return;
     try {
       await api(duongDan, { method: "POST", body: body ? JSON.stringify(body) : undefined });
-      setThongBao({ loai: "thanh_cong", text: thanhCong });
+      toast.thanhCong(thanhCong);
       await Promise.all([taiChiTiet(dangChonId), taiDanhSach()]);
     } catch (e: any) {
-      setThongBao({ loai: "loi", text: e.message });
+      toast.loi(e.message);
     }
   };
 
@@ -85,23 +89,24 @@ export default function HoiThoai() {
     if (dangChonId === null || !noiDungGui.trim()) return;
     setDangGui(true);
     try {
-      await api(`/api/hoi-thoai/${dangChonId}/gui-tin-nhan`, {
+      const kq = await api(`/api/hoi-thoai/${dangChonId}/gui-tin-nhan`, {
         method: "POST",
         body: JSON.stringify({ content: noiDungGui.trim(), sender_type: "nhan_vien" }),
       });
       setNoiDungGui("");
+      if (kq?.status === "loi_gui") toast.loi(`Gửi thất bại: ${kq.error || "connector lỗi"}`);
       await taiChiTiet(dangChonId);
     } catch (e: any) {
-      setThongBao({ loai: "loi", text: e.message });
+      toast.loi(e.message);
     } finally {
       setDangGui(false);
     }
   };
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang tieuDe="Hội thoại" moTa="Hộp thư hội thoại thật từ hệ thống. Bot tự dừng khi nhân viên tiếp quản.">
-        <Nut mau="xam" onClick={taiDanhSach}>Làm mới</Nut>
+        <Nut mau="xam" onClick={taiDanhSach}><i className="fa-solid fa-rotate mr-2" />Làm mới</Nut>
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
 
@@ -111,6 +116,21 @@ export default function HoiThoai() {
           <div className="p-3 border-b space-y-2">
             <input className={oNhap} placeholder="Tìm theo tên khách hoặc nội dung tin nhắn..."
               value={tuKhoa} onChange={(e) => setTuKhoa(e.target.value)} />
+            {/* Lọc theo tình trạng nhắn tin (mục 9.2) */}
+            <div className="flex rounded-lg border overflow-hidden text-sm" role="tablist" aria-label="Lọc theo tình trạng nhắn tin">
+              {[
+                ["", "Tất cả"],
+                ["da_nhan_tin", "Đã nhắn tin"],
+                ["chua_nhan_tin", "Chưa nhắn"],
+              ].map(([v, nhan]) => (
+                <button key={v} role="tab" aria-selected={locTin === v}
+                  onClick={() => setLocTin(v)}
+                  className={`flex-1 px-2 py-2 transition-colors duration-160 ${
+                    locTin === v ? "bg-thuongHieu-600 text-white font-medium" : "bg-white dark:bg-neutral-900 hover:bg-gray-50 dark:hover:bg-neutral-800"}`}>
+                  {nhan}
+                </button>
+              ))}
+            </div>
             <select className={oNhap} value={locTrangThai} onChange={(e) => setLocTrangThai(e.target.value)}>
               <option value="">Tất cả trạng thái</option>
               <option value="dang_xu_ly">Đang xử lý</option>
@@ -134,6 +154,12 @@ export default function HoiThoai() {
                     <span className="text-xs text-gray-400 whitespace-nowrap">{dinhDangThoiGian(c.last_message_at || c.updated_at)}</span>
                   </div>
                   <p className="text-sm text-gray-500 truncate mt-0.5">{c.last_message || "Chưa có tin nhắn"}</p>
+                  <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                    <i className="fa-regular fa-message" />
+                    {(c.message_count || 0) === 0 ? "Chưa có tin nhắn nào" : `${c.message_count} tin nhắn`}
+                    {c.channel && <> · Kênh: {c.channel === "ca_nhan" ? "Zalo cá nhân" : c.channel === "oa" ? "Zalo OA" : "Mô phỏng"}</>}
+                    {c.assignee && <> · Phụ trách: {c.assignee}</>}
+                  </p>
                   <div className="flex flex-wrap gap-1.5 mt-1.5 items-center">
                     <HuyHieuTrangThai giaTri={c.status} />
                     {c.human_takeover
@@ -141,7 +167,7 @@ export default function HoiThoai() {
                       : c.bot_enabled
                         ? <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">Bot đang bật</span>
                         : <span className="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full">Bot đã tạm dừng</span>}
-                    {c.labels && <span className="text-xs text-gray-500">🏷 {c.labels}</span>}
+                    {c.labels && <span className="text-xs text-gray-500"><i className="fa-solid fa-tag mr-1" />{c.labels}</span>}
                   </div>
                 </button>
               ))
@@ -152,7 +178,7 @@ export default function HoiThoai() {
         {/* Cột phải — khung chat */}
         <section className="bg-white dark:bg-neutral-900 rounded shadow flex flex-col min-h-[70vh]">
           {dangChonId === null ? (
-            <div className="p-6"><ChuaCoDuLieu text="Chưa có hội thoại nào. Hội thoại sẽ xuất hiện khi khách nhắn tin qua Zalo (hoặc qua kênh mô phỏng khi kiểm thử)." /></div>
+            <div className="p-4 sm:p-6"><ChuaCoDuLieu text="Chưa có hội thoại nào. Hội thoại sẽ xuất hiện khi khách nhắn tin qua Zalo (hoặc qua kênh mô phỏng khi kiểm thử)." /></div>
           ) : dangTaiChiTiet && !chiTiet ? (
             <DangTai text="Đang tải tin nhắn..." />
           ) : !chiTiet ? (
@@ -228,8 +254,8 @@ export default function HoiThoai() {
                               ? "bg-blue-100 dark:bg-blue-950 rounded-br-sm"
                               : "bg-green-100 dark:bg-green-950 rounded-br-sm"}`}>
                           <p className="text-[11px] font-medium text-gray-500 mb-0.5">
+                            {m.sender_type === "bot" && <i className="fa-solid fa-robot mr-1" />}
                             {NHAN_NGUOI_GUI[m.sender_type] || m.sender_type}
-                            {m.sender_type === "bot" && " 🤖"}
                           </p>
                           <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
                           <p className="text-[11px] text-gray-400 mt-1 text-right">

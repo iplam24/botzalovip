@@ -13,7 +13,9 @@ def list_a(db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     return [{"id": a.id, "name": a.name, "account_type": a.account_type, "status": a.status, "last_error": a.last_error} for a in db.query(ZaloAccount).all()]
 @router.post("/mock/nhan-tin-nhan")
 def mock_inbound(data: InboundIn, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
-    return process_inbound(db, data.external_id, data.customer_external_id, data.customer_name, data.content, data.zalo_account_id)
+    return process_inbound(db, data.external_id, data.customer_external_id, data.customer_name, data.content,
+                           data.zalo_account_id, mentions=data.mentions, la_nhom=data.la_nhom,
+                           bot_uid=data.bot_uid, nguoi_gui_id=data.nguoi_gui_id, cli_msg_id=data.cli_msg_id)
 @router.post("/kiem-tra-connector")
 def check_connector(db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     mock = MockZaloConnector().status(); oa = ZaloOAStubConnector("").status(); ca_nhan = ZaloPersonalConnector().status()
@@ -32,6 +34,11 @@ def ca_nhan_qr(u: User = Depends(get_current_user)):
 @router.post("/ca-nhan/ngat-ket-noi")
 def ca_nhan_disconnect(u: User = Depends(get_current_user)):
     return ZaloPersonalConnector().disconnect()
+@router.post("/ca-nhan/ngat-lien-ket")
+def ca_nhan_unlink(u: User = Depends(get_current_user)):
+    """Ngắt LIÊN KẾT hẳn: sidecar dừng phiên + xóa dữ liệu phiên đã lưu
+    (phải quét QR lại). Chỉ tồn tại vì sidecar hỗ trợ thật thao tác này."""
+    return ZaloPersonalConnector().ngat_lien_ket()
 @router.post("/ca-nhan/gui-tin-nhan")
 async def ca_nhan_send(req: Request, u: User = Depends(get_current_user)):
     body = await req.json()
@@ -55,4 +62,12 @@ async def webhook_ca_nhan(req: Request, db: Session = Depends(get_db), x_connect
     content = body.get("content") or body.get("message") or body.get("text") or ""
     if not external_id or not content:
         raise HTTPException(400, "Thiếu external_id hoặc nội dung tin nhắn")
-    return process_inbound(db, str(external_id), str(customer_external_id), str(customer_name), str(content), body.get("zalo_account_id"), channel="ca_nhan")
+    # Trường nhóm Zalo (mục 7): sidecar gửi kèm mentions + cờ nhóm + UID của bot
+    mentions = body.get("mentions") if isinstance(body.get("mentions"), list) else None
+    la_nhom = bool(body.get("la_nhom") or body.get("loai_thread") == 1 or body.get("thread_type") == 1)
+    return process_inbound(db, str(external_id), str(customer_external_id), str(customer_name), str(content),
+                           body.get("zalo_account_id"), channel="ca_nhan",
+                           mentions=mentions, la_nhom=la_nhom,
+                           bot_uid=str(body.get("bot_uid") or body.get("tai_khoan_id") or ""),
+                           nguoi_gui_id=str(body.get("nguoi_gui_id") or body.get("uid_from") or ""),
+                           cli_msg_id=str(body.get("cli_msg_id") or body.get("cliMsgId") or ""))

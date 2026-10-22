@@ -96,9 +96,9 @@ export default function DichVu() {
     setForm((f: any) => ({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang tieuDe="Dịch vụ" moTa="Danh mục dịch vụ động — bot tư vấn theo dữ liệu tại đây, thêm dịch vụ mới không cần sửa code.">
-        <Nut onClick={moThem}>+ Thêm dịch vụ</Nut>
+        <Nut onClick={moThem}><i className="fa-solid fa-plus mr-2" />Thêm dịch vụ</Nut>
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
 
@@ -155,7 +155,7 @@ export default function DichVu() {
 
       <HopBieuMau mo={moForm} tieuDe={dangSua ? `Sửa dịch vụ (đang là v${dangSua.version} — lưu sẽ tăng phiên bản)` : "Thêm dịch vụ"} onDong={() => setMoForm(false)} rong="max-w-2xl">
         <form onSubmit={luu}>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Truong nhan="Tên dịch vụ" batBuoc>
               <input className={oNhap} value={form.name} onChange={dat("name")} required placeholder="Ví dụ: Dịch vụ chăm sóc khách hàng" />
             </Truong>

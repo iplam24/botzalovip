@@ -16,13 +16,17 @@ class ZaloConnector(ABC):
     def get_conversation(self, cid): return {"id": cid}
 
 class MockZaloConnector(ZaloConnector):
-    def __init__(self): self.connected = True; self.sent = []
+    def __init__(self): self.connected = True; self.sent = []; self.reactions = []; self.typings = []
     def connect(self): self.connected = True; return {"trang_thai": "da_ket_noi", "moi_truong": "mo_phong"}
     def disconnect(self): self.connected = False; return {"trang_thai": "da_ngat"}
     def status(self): return {"trang_thai": "da_ket_noi" if self.connected else "mat_ket_noi", "moi_truong": "mo_phong", "ho_tro": ["send_text"]}
     def send_text(self, cid, text):
         if not self.connected: raise RuntimeError("Connector mất kết nối (mô phỏng)")
         self.sent.append((cid, text)); return {"thanh_cong": True, "mo_phong": True}
+    def tha_tim(self, thread_id, message_id, loai_thread=0, cli_msg_id=""):
+        self.reactions.append((str(thread_id), str(message_id), loai_thread)); return {"thanh_cong": True, "mo_phong": True}
+    def typing(self, thread_id, loai_thread=0):
+        self.typings.append((str(thread_id), loai_thread)); return {"thanh_cong": True, "mo_phong": True}
 
 class ZaloOAStubConnector(ZaloConnector):
     """Zalo OA cần token OA/app chính thức. Thiếu token thì báo CHƯA HỖ TRỢ, không fake."""
@@ -84,6 +88,48 @@ class ZaloPersonalConnector(ZaloConnector):
             raise RuntimeError("Mất kết nối / Chưa chạy dịch vụ Zalo cá nhân") from e
         if code >= 400: raise RuntimeError(data.get("thong_bao", f"Sidecar trả lỗi {code}"))
         return data
+    def tha_tim(self, thread_id, message_id, loai_thread=0, cli_msg_id=""):
+        """Thả reaction ❤ vào tin nhắn của khách qua endpoint /tha-tim của
+        sidecar (zca-js addReaction — đã kiểm chứng thư viện hỗ trợ thật).
+        Sidecar trả 501 nếu bản thư viện không có addReaction -> NotImplementedError."""
+        try:
+            code, data = self._call("POST", "/tha-tim", {
+                "thread_id": str(thread_id), "message_id": str(message_id),
+                "cli_msg_id": str(cli_msg_id or ""), "loai_thread": int(loai_thread or 0),
+            })
+        except Exception as e:
+            raise RuntimeError("Mất kết nối / Chưa chạy dịch vụ Zalo cá nhân") from e
+        if code == 501: raise NotImplementedError(data.get("thong_bao", "Thư viện zca-js không hỗ trợ thả cảm xúc trong bản hiện tại"))
+        if code >= 400: raise RuntimeError(data.get("thong_bao", f"Sidecar trả lỗi {code}"))
+        return data
+    def typing(self, thread_id, loai_thread=0):
+        """Hiệu ứng 'đang soạn tin' qua zca-js sendTypingEvent (sidecar /dang-soan-tin)."""
+        try:
+            code, data = self._call("POST", "/dang-soan-tin", {"thread_id": str(thread_id), "loai_thread": int(loai_thread or 0)})
+        except Exception as e:
+            raise RuntimeError("Mất kết nối / Chưa chạy dịch vụ Zalo cá nhân") from e
+        if code == 501: raise NotImplementedError(data.get("thong_bao", "Thư viện zca-js không hỗ trợ hiệu ứng đang soạn tin"))
+        if code >= 400: raise RuntimeError(data.get("thong_bao", f"Sidecar trả lỗi {code}"))
+        return data
+    def danh_sach_ban_be(self):
+        """Lấy danh sách bạn bè THẬT từ sidecar (zca-js getAllFriends).
+        Sidecar offline/chưa đăng nhập -> RuntimeError với lý do thật, không fake."""
+        try:
+            code, data = self._call("GET", "/ban-be")
+        except Exception as e:
+            raise RuntimeError("Mất kết nối / Chưa chạy dịch vụ Zalo cá nhân") from e
+        if code == 501: raise NotImplementedError(data.get("thong_bao", "Thư viện zca-js không hỗ trợ lấy danh sách bạn bè"))
+        if code >= 400: raise RuntimeError(data.get("thong_bao", f"Sidecar trả lỗi {code}"))
+        return data.get("ban_be", []) if isinstance(data, dict) else []
+    def ngat_lien_ket(self):
+        """Ngắt liên kết hẳn: sidecar dừng listener + XÓA dữ liệu phiên đã lưu
+        (phải quét QR lại mới kết nối được). Khác ngat-ket-noi (chỉ dừng tạm)."""
+        try:
+            code, data = self._call("POST", "/ngat-lien-ket")
+            if code >= 400: return {"trang_thai": "loi", "thong_bao": data.get("thong_bao", "Không ngắt liên kết được"), "chi_tiet": data}
+            return data
+        except Exception:
+            return {**self.OFFLINE, "trang_thai": "mat_ket_noi"}
     def send_image(self, cid, url): raise NotImplementedError("Chưa hỗ trợ gửi hình ảnh qua Zalo cá nhân")
     def react(self, message_id, icon=""):
         try:

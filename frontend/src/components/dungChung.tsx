@@ -29,8 +29,8 @@ export function LoiTai({ loi, onThuLai }: { loi: string; onThuLai?: () => void }
 
 export function ChuaCoDuLieu({ text }: { text: string }) {
   return (
-    <div className="bg-white dark:bg-neutral-900 rounded shadow p-8 text-center text-gray-500">
-      <p className="text-4xl mb-2">🗂️</p>
+    <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-the p-8 text-center text-gray-500">
+      <p className="text-4xl mb-2 text-gray-300"><i className="fa-regular fa-folder-open" /></p>
       <p>{text}</p>
     </div>
   );
@@ -134,6 +134,39 @@ export function HopBieuMau({ mo, tieuDe, onDong, children, rong = "max-w-lg" }: 
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+// Nút gạt bật/tắt dùng chung (toggle switch thuần CSS trong index.css)
+export function NutGat({ bat, onDoi, disabled, nhan }: {
+  bat: boolean; onDoi: (batMoi: boolean) => void; disabled?: boolean; nhan?: string;
+}) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <label className="nut-gat" title={nhan}>
+        <input type="checkbox" checked={bat} disabled={disabled}
+          onChange={(e) => onDoi(e.target.checked)} aria-label={nhan || "Bật/tắt"} />
+        <span className="duong-ray" />
+      </label>
+      {nhan && <span className="text-sm">{nhan}</span>}
+    </span>
+  );
+}
+
+// Khung xương (skeleton) khi đang tải dữ liệu — thay spinner ở danh sách
+export function SkeletonDanhSach({ soDong = 4 }: { soDong?: number }) {
+  return (
+    <div className="p-4 space-y-3" aria-label="Đang tải dữ liệu">
+      {Array.from({ length: soDong }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3">
+          <div className="skeleton w-10 h-10 !rounded-full" />
+          <div className="flex-1 space-y-2">
+            <div className="skeleton h-3.5 w-2/5" />
+            <div className="skeleton h-3 w-4/5" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

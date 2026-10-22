@@ -18,6 +18,9 @@ CAC_LOAI = [
     "khach_moi", "co_so_dien_thoai", "du_thong_tin", "gap_nhan_vien",
     "khieu_nai", "bot_khong_tra_loi_duoc", "loi_he_thong",
 ]
+# Mặc định dự phòng — giá trị THẬT đọc runtime từ Cài đặt hệ thống
+# (thong_bao_cua_so_chong_trung_phut / thong_bao_gian_cach_gui_zalo_giay),
+# chuyển từ hằng số cứng theo Đợt nâng cấp 2 mục 11.2.
 CUA_SO_CHONG_TRUNG_PHUT = 10
 GIOI_HAN_GUI_ZALO_GIAY = 60
 
@@ -33,9 +36,16 @@ def _doc_cai_dat(db: Session) -> dict:
 def _gui_zalo_admin(db: Session, tb: Notification, cai_dat: dict, channel: str):
     """Gửi thông báo qua Zalo cá nhân cho admin nếu đã cấu hình + đúng kênh
     + qua giới hạn tần suất. Đánh dấu sent_via_zalo khi gửi thành công."""
+    if cai_dat.get("module_gui_thong_bao_zalo_admin", True) is False:
+        return
     thread_id = str(cai_dat.get("thong_bao_admin_zalo_thread_id") or "").strip()
     if not thread_id or channel != "ca_nhan":
         return
+    gian_cach = cai_dat.get("thong_bao_gian_cach_gui_zalo_giay", GIOI_HAN_GUI_ZALO_GIAY)
+    try:
+        gian_cach = float(gian_cach)
+    except (TypeError, ValueError):
+        gian_cach = GIOI_HAN_GUI_ZALO_GIAY
     gan_nhat = (
         db.query(Notification)
         .filter(Notification.sent_via_zalo == True, Notification.id != tb.id)  # noqa: E712
@@ -46,7 +56,7 @@ def _gui_zalo_admin(db: Session, tb: Notification, cai_dat: dict, channel: str):
         moc = gan_nhat.created_at
         if moc.tzinfo is None:
             moc = moc.replace(tzinfo=timezone.utc)
-        if (datetime.now(timezone.utc) - moc).total_seconds() < GIOI_HAN_GUI_ZALO_GIAY:
+        if (datetime.now(timezone.utc) - moc).total_seconds() < gian_cach:
             return
     ZaloPersonalConnector().send_text(thread_id, f"[{tb.title}] {tb.content}")
     tb.sent_via_zalo = True
@@ -62,10 +72,17 @@ def notify(db: Session, loai: str, title: str, content: str, customer_id=None,
     """
     try:
         cai_dat = _doc_cai_dat(db)
+        if cai_dat.get("module_thong_bao_admin", True) is False:
+            return None
         if cai_dat.get(f"thong_bao_{loai}", True) is False:
             return None
+        cua_so = cai_dat.get("thong_bao_cua_so_chong_trung_phut", CUA_SO_CHONG_TRUNG_PHUT)
+        try:
+            cua_so = float(cua_so)
+        except (TypeError, ValueError):
+            cua_so = CUA_SO_CHONG_TRUNG_PHUT
         if loai != "gap_nhan_vien" and customer_id is not None:
-            moc = datetime.now(timezone.utc) - timedelta(minutes=CUA_SO_CHONG_TRUNG_PHUT)
+            moc = datetime.now(timezone.utc) - timedelta(minutes=cua_so)
             trung = (
                 db.query(Notification)
                 .filter(Notification.type == loai, Notification.customer_id == customer_id,

@@ -16,6 +16,7 @@ def get_current_user(creds: HTTPAuthorizationCredentials = Depends(bearer), db: 
     except pyjwt.PyJWTError: raise HTTPException(401, "Phiên đăng nhập không hợp lệ hoặc đã hết hạn")
     user = db.query(User).filter(User.id == int(payload["sub"])).first()
     if not user: raise HTTPException(401, "Người dùng không tồn tại")
+    if not user.is_active: raise HTTPException(403, "Tài khoản đã bị khóa")
     return user
 
 def require_admin(user: User = Depends(get_current_user)):

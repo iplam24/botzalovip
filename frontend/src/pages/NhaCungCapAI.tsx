@@ -1,8 +1,9 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import {
-  ChuaCoDuLieu, DangTai, HopBieuMau, HopXacNhan, HuyHieuTrangThai, LoiTai, Nut, ThongBao, TieuDeTrang, Truong, oNhap,
+  ChuaCoDuLieu, DangTai, HopBieuMau, HopXacNhan, HuyHieuTrangThai, LoiTai, Nut, NutGat, ThongBao, TieuDeTrang, Truong, oNhap,
 } from "../components/dungChung";
+import { useToast } from "../components/Toast";
 
 // Nhà cung cấp AI: cấu hình mô hình qua giao diện (không sửa code),
 // khóa API chỉ hiển thị dạng che (masked) — backend không bao giờ trả khóa đầy đủ.
@@ -18,6 +19,7 @@ const NHAN_NHA_CUNG_CAP: Record<string, string> = {
 };
 
 export default function NhaCungCapAI() {
+  const toast = useToast();
   const [ds, setDs] = useState<any[]>([]);
   const [dangTai, setDangTai] = useState(true);
   const [loi, setLoi] = useState("");
@@ -92,13 +94,17 @@ export default function NhaCungCapAI() {
     }
   };
 
-  const voHieuHoa = async (p: any) => {
+  // Bật/tắt nhanh ngay tại danh sách qua endpoint PATCH riêng (mục 9.1).
+  // Tắt provider đang mặc định: backend trả 400 kèm yêu cầu chọn mặc định khác
+  // -> hiển thị nguyên văn cảnh báo đó bằng toast, trạng thái giữ nguyên.
+  const batTat = async (p: any, batMoi: boolean) => {
     try {
-      await api(`/api/ai-providers/${p.id}`, { method: "PUT", body: JSON.stringify({ is_active: !p.is_active }) });
-      setThongBao({ loai: "thanh_cong", text: p.is_active ? `Đã vô hiệu hóa “${p.name}”.` : `Đã bật lại “${p.name}”.` });
+      await api(`/api/ai-providers/${p.id}/bat-tat`, { method: "PATCH", body: JSON.stringify({ is_active: batMoi }) });
+      toast.thanhCong(batMoi ? `Đã bật “${p.name}”.` : `Đã tắt “${p.name}” — nhà cung cấp này sẽ không được dùng khi gửi tin.`);
       await tai();
     } catch (e: any) {
-      setThongBao({ loai: "loi", text: e.message });
+      toast.loi(e.message);
+      await tai();
     }
   };
 
@@ -122,9 +128,9 @@ export default function NhaCungCapAI() {
     setForm((f: any) => ({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang tieuDe="Nhà cung cấp AI" moTa="Thêm, kiểm tra và đổi mô hình bằng giao diện — không cần sửa mã nguồn. Khóa API được mã hóa khi lưu và chỉ hiển thị dạng che.">
-        <Nut onClick={moThem}>+ Thêm cấu hình</Nut>
+        <Nut onClick={moThem}><i className="fa-solid fa-plus mr-2" />Thêm cấu hình</Nut>
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
 
@@ -141,7 +147,7 @@ export default function NhaCungCapAI() {
                     <p className="font-bold text-lg flex items-center gap-2">
                       {p.name}
                       {p.is_default && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">Mặc định</span>}
-                      {!p.is_active && <span className="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full">Đã vô hiệu hóa</span>}
+                      {!p.is_active && <span className="text-xs bg-gray-300 text-gray-700 px-2 py-0.5 rounded-full"><i className="fa-solid fa-power-off mr-1" />Đang tắt</span>}
                     </p>
                     <p className="text-sm text-gray-500 mt-1">
                       {NHAN_NHA_CUNG_CAP[p.provider] || p.provider}
@@ -172,14 +178,23 @@ export default function NhaCungCapAI() {
                   </div>
                 )}
 
-                <div className="flex flex-wrap gap-2 mt-4">
+                <div className="flex flex-wrap items-center gap-2 mt-4">
                   <Nut onClick={() => kiemTra(p)} disabled={dangKiemTraId === p.id}>
+                    <i className="fa-solid fa-plug-circle-check mr-2" />
                     {dangKiemTraId === p.id ? "Đang kiểm tra..." : "Kiểm tra kết nối"}
                   </Nut>
-                  <Nut mau="xam" onClick={() => moSua(p)}>Sửa cấu hình</Nut>
-                  <Nut mau="xam" onClick={() => voHieuHoa(p)}>{p.is_active ? "Vô hiệu hóa" : "Bật lại"}</Nut>
-                  <Nut mau="do" onClick={() => setXoaId(p.id)}>Xóa</Nut>
+                  <Nut mau="xam" onClick={() => moSua(p)}><i className="fa-solid fa-pen mr-2" />Sửa cấu hình</Nut>
+                  <span className="inline-flex items-center gap-2 border rounded-lg px-3 py-1.5 bg-gray-50 dark:bg-neutral-800">
+                    <NutGat bat={!!p.is_active} onDoi={(batMoi) => batTat(p, batMoi)} nhan={p.is_active ? "Đang bật" : "Đang tắt"} />
+                  </span>
+                  <Nut mau="do" onClick={() => setXoaId(p.id)}><i className="fa-regular fa-trash-can mr-2" />Xóa</Nut>
                 </div>
+                {p.is_default && p.is_active && (
+                  <p className="text-xs text-gray-400 mt-2">
+                    <i className="fa-solid fa-circle-info mr-1" />
+                    Đây là nhà cung cấp mặc định — muốn tắt, hãy đặt một nhà cung cấp khác làm mặc định trước.
+                  </p>
+                )}
               </section>
             );
           })}
@@ -204,7 +219,7 @@ export default function NhaCungCapAI() {
             <input className={oNhap} type="password" value={form.api_key} onChange={dat("api_key")}
               placeholder={dangSua ? "•••••••• (không đổi)" : "Nhập khóa API — sẽ được mã hóa khi lưu"} autoComplete="new-password" />
           </Truong>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Truong nhan="Mô hình hội thoại" batBuoc>
               <input className={oNhap} value={form.model} onChange={dat("model")} required placeholder="Ví dụ: code" />
             </Truong>
@@ -212,7 +227,7 @@ export default function NhaCungCapAI() {
               <input className={oNhap} value={form.embedding_model} onChange={dat("embedding_model")} placeholder="Có thể để trống" />
             </Truong>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Truong nhan="Giới hạn token mỗi lần gọi">
               <input className={oNhap} type="number" min={1} value={form.max_tokens} onChange={dat("max_tokens")} />
             </Truong>

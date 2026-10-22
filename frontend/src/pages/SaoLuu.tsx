@@ -85,9 +85,9 @@ export default function SaoLuu() {
   };
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <TieuDeTrang tieuDe="Sao lưu và khôi phục" moTa="Bản sao lưu dạng ZIP chứa dữ liệu JSON. Khóa API được redact trước khi ghi vào file — sau khôi phục phải cấu hình lại khóa API.">
-        <Nut onClick={taoMoi} disabled={dangTao}>{dangTao ? "Đang tạo..." : "Tạo sao lưu ngay"}</Nut>
+        <Nut onClick={taoMoi} disabled={dangTao}><i className="fa-solid fa-database mr-2" />{dangTao ? "Đang tạo..." : "Tạo sao lưu ngay"}</Nut>
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
 
