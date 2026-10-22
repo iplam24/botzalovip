@@ -98,7 +98,7 @@ def parse_chat_response(raw_text: str, content_type: str = ""):
 def get_default_provider(db: Session):
     return db.query(AIProviderConfig).filter(AIProviderConfig.is_default == True, AIProviderConfig.is_active == True).first() or db.query(AIProviderConfig).filter(AIProviderConfig.is_active == True).first()
 
-def generate_reply(db: Session, provider: AIProviderConfig, question: str, context_chunks: list, memories: list):
+def generate_reply(db: Session, provider: AIProviderConfig, question: str, context_chunks: list, memories: list, goi_y_hoi_sdt: bool = False):
     alias_model = provider.model if provider else "mock-model"
     try:
         if not provider or provider.provider == "mock":
@@ -107,9 +107,13 @@ def generate_reply(db: Session, provider: AIProviderConfig, question: str, conte
             return text, alias_model
         key = decrypt_secret(provider.api_key_encrypted)
         if not key or not provider.base_url: raise AIError("Chưa cấu hình khóa API hoặc địa chỉ API cho nhà cung cấp này")
+        noi_dung_hoi = question + "\nNgữ cảnh:\n" + "\n".join(c["content"] for c in context_chunks)
+        if goi_y_hoi_sdt:
+            # Khách chưa có SĐT: gợi ý model kết thúc bằng câu hỏi xin số điện thoại tự nhiên
+            noi_dung_hoi += "\nKhách chưa cung cấp số điện thoại. Hãy kết thúc câu trả lời bằng một câu hỏi xin số điện thoại thật tự nhiên, để tư vấn viên có thể liên hệ lại tư vấn chi tiết."
         with http_client(timeout=provider.timeout or 30) as client:
             r = client.post(f"{provider.base_url.rstrip('/')}/chat/completions", headers={"Authorization": f"Bearer {key}"},
-                json={"model": provider.model, "stream": False, "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": question + "\nNgữ cảnh:\n" + "\n".join(c["content"] for c in context_chunks)}]})
+                json={"model": provider.model, "stream": False, "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": noi_dung_hoi}]})
             if r.status_code >= 400: raise AIError(f"Provider trả lỗi {r.status_code}: {r.text[:200]}")
             parsed = parse_chat_response(r.text, r.headers.get("content-type", "") if hasattr(r, "headers") else "")
         text = parsed["content"]

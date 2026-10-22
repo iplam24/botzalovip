@@ -106,6 +106,47 @@ Mọi trang đều gọi API thật, có trạng thái đang tải / chưa có d
 ### Quét bí mật
 - Đã grep toàn repo (ngoài node_modules/.venv/.git) theo `sk-`, `ghp_`: chỉ còn các chuỗi kiểm thử giả trong test (`sk-secret-khong-that`, `khoa-test-khong-that`...) và khóa mẫu đã redact trong `.env.example` — không có khóa thật nào trong mã nguồn.
 
+## Cập nhật Giai đoạn mở rộng 1 (22/10/2026) — Thu thập thông tin + Xuất Excel + Thông báo admin
+
+Tổng kiểm thử sau đợt này: **40 passed** (32 cũ + 8 mới test_33 → test_40). Frontend build thành công (dist JS ~260,7 kB, gzip ~74,4 kB).
+
+### 1. Bot tự thu thập thông tin khách hàng
+- Bảng mới `thong_tin_thu_thap` (model `CollectedInfo`): customer_id, field (ho_ten / so_dien_thoai / email / nhu_cau / dich_vu_quan_tam / ngan_sach / thoi_gian_mong_muon / dia_chi / ghi_chu), value, source_message_id, confidence, verified, mốc thời gian. Thêm cột `email` vào `customers` (create_all + ALTER TABLE nhẹ trong seed cho DB cũ, cùng mẫu với cột channel).
+- `app/services/extraction_service.py`: (a) quy tắc — SĐT di động VN (chấp nhận +84, dấu chấm/khoảng trắng/gạch ngang, chuẩn hóa về 0xxxxxxxxx, kiểm tra đầu số 03/05/07/08/09, tin cậy 0.95) + email; (b) AI — chỉ khi provider mặc định là provider thật: gọi chat/completions yêu cầu JSON thuần theo schema 6 trường, parse an toàn (lấy khối {...}, lọc đúng khóa, cắt 500 ký tự), lỗi thì bỏ qua, ghi AIUsage như gateway; Mock thì chỉ chạy quy tắc. Tin cậy AI: 0.7.
+- Lưu vết đầy đủ nhưng chống trùng liên tiếp (cùng khách + trường + giá trị với bản ghi gần nhất thì bỏ qua). Chỉ điền vào trường hồ sơ Customer đang trống (phone/email/display_name), không ghi đè.
+- Gắn vào orchestrator ngay sau khi lưu tin khách (chạy cả khi bot tạm dừng; lỗi chỉ ghi SystemLog module `thu_thap`, không chặn trả lời). Cập nhật luôn `last_interaction_at` của khách theo tin mới nhất.
+- Hỏi bổ sung SĐT: khách chưa có SĐT + intent báo giá/tư vấn → tối đa 1 lần/hội thoại (đánh dấu bằng SystemLog). Provider thật: gợi ý trong prompt qua tham số `goi_y_hoi_sdt` của gateway; Mock: nối đúng 1 hậu tố câu hỏi vào câu trả lời (không gửi 2 tin).
+- API: `GET/POST /api/khach-hang/{id}/thong-tin-thu-thap`, `PUT/DELETE /api/khach-hang/{id}/thong-tin-thu-thap/{tid}` (sửa giá trị, xác minh; trường lạ → 400).
+- Frontend Khách hàng: nút **Thông tin thu thập** mở panel — bảng giá trị/độ tin cậy/nguồn tin nhắn/trạng thái xác minh + Xác minh/Sửa/Xóa + form thêm tay.
+
+### 2. Xuất Excel (openpyxl 3.1.5, đã thêm vào requirements.txt)
+- `GET /api/khach-hang/xuat-excel`: cột Họ tên, Số điện thoại, Email, Nhãn, Nhóm, Dịch vụ quan tâm, Nhu cầu, Ngân sách (lấy từ thông tin thu thập mới nhất), Lần tương tác cuối, Số hội thoại; lọc `tu_khoa`/`nhan`/`tu_ngay`/`den_ngay`; tên file không dấu `danh-sach-khach-hang-<timestamp>.xlsx`, đúng content-type xlsx.
+- `GET /api/phan-tich/xuat-excel`: sheet "Số liệu" (chỉ số tiếng Việt từ `tinh_phan_tich`) + sheet "Lượt gọi AI" (tối đa 500 lượt gần nhất).
+- Frontend: nút **Xuất Excel** ở trang Khách hàng (dùng lại `apiTaiFile`/`taiBlobXuong` của api.ts).
+
+### 3. Thông báo cho admin
+- Bảng mới `thong_bao` (model `Notification`): type (khach_moi / co_so_dien_thoai / du_thong_tin / gap_nhan_vien / khieu_nai / bot_khong_tra_loi_duoc / loi_he_thong), title, content, conversation_id, customer_id, level, is_read, sent_via_zalo.
+- `app/services/notification_service.py`: chống trùng cùng loại + cùng khách trong 10 phút (gap_nhan_vien được miễn); `notify()` không bao giờ ném lỗi ra pipeline. Điểm gắn trong orchestrator: khách mới tạo, lần đầu có SĐT, vừa đủ bộ thông tin tối thiểu (SĐT + nhu cầu/dịch vụ quan tâm), intent gặp nhân viên/khiếu nại (kể cả quy tắc chuyển nhân viên), lỗi provider AI, lỗi gửi tin qua connector.
+- Cài đặt trong `/api/cai-dat` (system_settings): `thong_bao_admin_zalo_thread_id` + 7 cờ bật/tắt theo loại (mặc định bật hết, thread để trống). Gửi Zalo cho admin chỉ khi có thread + sự kiện thuộc kênh `ca_nhan`, giới hạn tối thiểu 60 giây/lần gửi (kiểm tra bản ghi `sent_via_zalo` gần nhất), lỗi gửi chỉ ghi log.
+- API: `GET /api/thong-bao` (lọc `chua_doc`, `loai`), `GET /api/thong-bao/dem-chua-doc`, `POST /api/thong-bao/{id}/da-doc`, `POST /api/thong-bao/danh-dau-tat-ca-da-doc`.
+- Frontend: trang **Thông báo** mới (lọc theo loại/chưa đọc, mức độ màu, đánh dấu đã đọc) + mục menu 🔔 Thông báo + chuông ở header hiện số chưa đọc thật (polling 30 giây qua `/api/thong-bao/dem-chua-doc`); trang Cài đặt thêm mục "Thông báo cho quản trị viên" (thread admin + 7 công tắc theo loại).
+
+### Kiểm thử mới (test_33 → test_40)
+- test_33: tin chứa SĐT dạng chấm + email → CollectedInfo lưu đúng (chuẩn hóa 0901234567, confidence 0.95, có source_message_id) + hồ sơ khách được điền phone/email.
+- test_34: gửi lại cùng SĐT → không lưu trùng; CRUD thủ công thêm/sửa/xác minh/xóa; trường không hợp lệ → 400.
+- test_35: Mock hỏi xin SĐT đúng 1 lần qua 2 tin báo giá liên tiếp (tin 2 không còn hậu tố).
+- test_36: xuất Excel khách hàng — content-type xlsx, mở lại bằng openpyxl, header tiếng Việt đúng, có dòng khách kèm SĐT; chưa đăng nhập bị chặn; Excel phân tích có sheet "Số liệu".
+- test_37: thông báo khach_moi + co_so_dien_thoai được tạo cho khách mới có SĐT; đếm chưa đọc/đánh dấu đã đọc/lọc chưa đọc + lọc theo loại.
+- test_38: chống trùng 10 phút ở tầng service (khach_moi lần 2 → None) và gap_nhan_vien được miễn chống trùng.
+- test_39: gửi Zalo cho admin — mặc định không gọi connector (monkeypatch đếm 0), cấu hình thread admin → gọi đúng 1 lần + sent_via_zalo=True, lần kế tiếp < 60 giây vẫn tạo bản ghi nhưng không gửi nữa; dọn cấu hình về mặc định sau test.
+- test_40: trích xuất AI (monkeypatch tầng AI) cho nhu_cau/dich_vu_quan_tam với confidence 0.7, SĐT có khoảng trắng vẫn chuẩn hóa được, thông báo du_thong_tin sinh khi đủ bộ tối thiểu; đánh dấu tất cả đã đọc đưa bộ đếm về 0.
+
+### Chưa làm / giới hạn trung thực của đợt này
+- Trích xuất AI chưa chạy thử với provider thật trong pytest (chỉ qua monkeypatch + code dùng chung parser/http_client đã kiểm chứng ở test_21/22); lần gọi AI trích xuất là 1 lượt gọi thêm cho mỗi tin khách khi dùng provider thật.
+- Lọc khách "đã đủ/thiếu thông tin" dạng bộ lọc riêng trên trang Khách hàng: chưa làm (đã xem được đủ/thiếu qua panel thu thập + thông báo du_thong_tin).
+- Thông báo qua email: chưa có (đúng lộ trình — mới có trong ứng dụng + Zalo admin).
+- Chưa deploy lên server, chưa commit git (main agent thực hiện).
+
 ## Cập nhật đợt 3 (kiểm chứng bởi main agent, 22/10/2026)
 - Sửa 2 lỗi môi trường thật trong AI Gateway: httpx lỗi "Invalid port" do NO_PROXY chứa IPv6 [::1] và lỗi xác minh chứng chỉ khi có proxy MITM. Gateway nay dùng `http_client()` (proxy tường minh, tôn trọng SSL_CERT_FILE, dịch vụ nội bộ đi trực tiếp) + test hồi quy test_30. Tổng test: **30 passed**.
 - Smoke test provider THẬT qua chính API của Hub (DB tạm, không lưu key): đăng nhập 200 → tạo provider model `code` (key chỉ hiện masked) → `kiem-tra` = **da_ket_noi / Kết nối thành công** → Trung tâm kiểm thử AI trả lời đúng danh tính đã khóa ("em là trợ lý hỗ trợ khách hàng của doanh nghiệp"), model thực tế phía provider được ghi nhận tự động.

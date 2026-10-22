@@ -314,6 +314,144 @@ def test_31_webhook_ca_nhan_gui_that_qua_connector_ca_nhan(monkeypatch):
     assert r.status_code == 200 and r.json().get("tra_loi")
     assert sent and sent[0][0] == "khach-ca-nhan-1"  # gửi đúng thread của khách qua connector cá nhân
 
+# ---- GĐ mở rộng 1: thu thập thông tin tự động + xuất Excel + thông báo admin ----
+def _khach_theo_external(eid):
+    ds = client.get("/api/khach-hang", headers=headers()).json()
+    return [c for c in ds if c["external_id"] == eid][0]
+
+def test_33_trich_xuat_sdt_email_tu_tin_nhan():
+    payload = {"external_id": "msg-tt-1", "customer_external_id": "khach-tt-1", "customer_name": "Lê Văn C",
+               "content": "Em muốn tư vấn dịch vụ, số điện thoại của em là 0901.234.567, email lienhe.test@example.com ạ"}
+    r = client.post("/api/zalo/mock/nhan-tin-nhan", json=payload, headers=headers())
+    assert r.status_code == 200, r.text
+    kh = _khach_theo_external("khach-tt-1")
+    # SĐT được chuẩn hóa (bỏ dấu chấm) và điền vào hồ sơ còn trống; email cũng vậy
+    assert kh["phone"] == "0901234567" and kh["email"] == "lienhe.test@example.com"
+    tt = client.get(f"/api/khach-hang/{kh['id']}/thong-tin-thu-thap", headers=headers()).json()
+    truong = {t["field"]: t for t in tt}
+    assert truong["so_dien_thoai"]["value"] == "0901234567" and truong["so_dien_thoai"]["confidence"] >= 0.9
+    assert truong["email"]["value"] == "lienhe.test@example.com"
+    assert truong["so_dien_thoai"]["source_message_id"] is not None
+    assert truong["so_dien_thoai"]["verified"] is False
+
+def test_34_chong_luu_trung_va_crud_thu_cong():
+    kh = _khach_theo_external("khach-tt-1")
+    truoc = client.get(f"/api/khach-hang/{kh['id']}/thong-tin-thu-thap", headers=headers()).json()
+    n_sdt = sum(1 for t in truoc if t["field"] == "so_dien_thoai")
+    # Gửi lại đúng SĐT cũ trong tin mới -> không thêm bản ghi trùng liên tiếp
+    client.post("/api/zalo/mock/nhan-tin-nhan", json={"external_id": "msg-tt-2", "customer_external_id": "khach-tt-1", "customer_name": "Lê Văn C", "content": "Số của em vẫn là 0901234567 nhé shop"}, headers=headers())
+    sau = client.get(f"/api/khach-hang/{kh['id']}/thong-tin-thu-thap", headers=headers()).json()
+    assert sum(1 for t in sau if t["field"] == "so_dien_thoai") == n_sdt
+    # CRUD thủ công: thêm -> sửa + xác minh -> xóa; trường lạ bị 400
+    r = client.post(f"/api/khach-hang/{kh['id']}/thong-tin-thu-thap", json={"field": "ghi_chu", "value": "Khách hẹn gọi lại buổi sáng"}, headers=headers())
+    assert r.status_code == 200 and r.json()["confidence"] == 1.0
+    tid = r.json()["id"]
+    r2 = client.put(f"/api/khach-hang/{kh['id']}/thong-tin-thu-thap/{tid}", json={"verified": True, "value": "Khách hẹn gọi lại buổi sáng (đã xác minh)"}, headers=headers())
+    assert r2.json()["verified"] is True and "đã xác minh" in r2.json()["value"]
+    r3 = client.delete(f"/api/khach-hang/{kh['id']}/thong-tin-thu-thap/{tid}", headers=headers())
+    assert r3.json()["da_xoa"] is True
+    r4 = client.post(f"/api/khach-hang/{kh['id']}/thong-tin-thu-thap", json={"field": "truong_la", "value": "x"}, headers=headers())
+    assert r4.status_code == 400
+
+def test_35_mock_hoi_sdt_dung_mot_lan():
+    r1 = client.post("/api/zalo/mock/nhan-tin-nhan", json={"external_id": "msg-hoi-1", "customer_external_id": "khach-hoi-1", "customer_name": "Phạm D", "content": "Cho em hỏi giá dịch vụ tư vấn tuyển dụng bao nhiêu?"}, headers=headers())
+    assert "cho em xin số điện thoại" in (r1.json()["tra_loi"] or "")
+    r2 = client.post("/api/zalo/mock/nhan-tin-nhan", json={"external_id": "msg-hoi-2", "customer_external_id": "khach-hoi-1", "customer_name": "Phạm D", "content": "Vậy báo giá chi tiết giúp em với"}, headers=headers())
+    assert r2.json()["tra_loi"]
+    assert "cho em xin số điện thoại" not in (r2.json()["tra_loi"] or "")
+
+def test_36_xuat_excel_khach_hang_va_phan_tich():
+    import io as _io
+    from openpyxl import load_workbook
+    r = client.get("/api/khach-hang/xuat-excel", headers=headers())
+    assert r.status_code == 200 and "spreadsheetml" in r.headers["content-type"]
+    assert ".xlsx" in r.headers.get("content-disposition", "")
+    ws = load_workbook(_io.BytesIO(r.content)).active
+    rows = list(ws.iter_rows(values_only=True))
+    assert list(rows[0]) == ["Họ tên", "Số điện thoại", "Email", "Nhãn", "Nhóm", "Dịch vụ quan tâm", "Nhu cầu", "Ngân sách", "Lần tương tác cuối", "Số hội thoại"]
+    assert any(row[1] == "0901234567" for row in rows[1:])
+    assert client.get("/api/khach-hang/xuat-excel").status_code in (401, 403)
+    r2 = client.get("/api/phan-tich/xuat-excel", headers=headers())
+    assert r2.status_code == 200 and "spreadsheetml" in r2.headers["content-type"]
+    assert "Số liệu" in load_workbook(_io.BytesIO(r2.content)).sheetnames
+
+def test_37_thong_bao_khach_moi_va_co_sdt_va_da_doc():
+    kh = _khach_theo_external("khach-tt-1")
+    ds = client.get("/api/thong-bao", headers=headers()).json()
+    cua_khach = [n for n in ds if n["customer_id"] == kh["id"]]
+    loai = {n["type"] for n in cua_khach}
+    assert "khach_moi" in loai and "co_so_dien_thoai" in loai
+    dem_truoc = client.get("/api/thong-bao/dem-chua-doc", headers=headers()).json()["chua_doc"]
+    assert dem_truoc >= 1
+    muc_tieu = [n for n in cua_khach if not n["is_read"]][0]
+    r = client.post(f"/api/thong-bao/{muc_tieu['id']}/da-doc", headers=headers())
+    assert r.json()["is_read"] is True
+    assert client.get("/api/thong-bao/dem-chua-doc", headers=headers()).json()["chua_doc"] == dem_truoc - 1
+    ds_chua_doc = client.get("/api/thong-bao?chua_doc=true", headers=headers()).json()
+    assert all(not n["is_read"] for n in ds_chua_doc)
+    ds_khach_moi = client.get("/api/thong-bao?loai=khach_moi", headers=headers()).json()
+    assert all(n["type"] == "khach_moi" for n in ds_khach_moi) and len(ds_khach_moi) >= 1
+
+def test_38_chong_trung_thong_bao_10_phut():
+    from app.database import SessionLocal
+    from app.services import notification_service
+    kh = _khach_theo_external("khach-tt-1")
+    db = SessionLocal()
+    # khach_moi của khách này đã tạo ở test_33 trong vòng 10 phút -> bị chống trùng
+    assert notification_service.notify(db, "khach_moi", "Trùng?", "kiem tra chong trung", customer_id=kh["id"]) is None
+    # gap_nhan_vien được miễn chống trùng: 2 lần liên tiếp đều tạo
+    g1 = notification_service.notify(db, "gap_nhan_vien", "Gặp NV 1", "x", customer_id=kh["id"])
+    g2 = notification_service.notify(db, "gap_nhan_vien", "Gặp NV 2", "x", customer_id=kh["id"])
+    assert g1 is not None and g2 is not None
+    db.close()
+
+def test_39_gui_thong_bao_zalo_cho_admin_co_cong_tac(monkeypatch):
+    from app.database import SessionLocal
+    from app.services import notification_service
+    da_gui = []
+    class FakePersonal:
+        def send_text(self, thread_id, text):
+            da_gui.append((thread_id, text)); return {"thanh_cong": True}
+    monkeypatch.setattr(notification_service, "ZaloPersonalConnector", lambda: FakePersonal())
+    r = client.post("/api/khach-hang", json={"display_name": "Khách Kiểm Thông Báo", "external_id": "khach-tb-1"}, headers=headers())
+    cid = r.json()["id"]
+    db = SessionLocal()
+    # Mặc định (chưa cấu hình thread admin) -> KHÔNG gọi connector dù sự kiện ở kênh ca_nhan
+    tb0 = notification_service.notify(db, "khieu_nai", "Khiếu nại test", "x", customer_id=cid, channel="ca_nhan")
+    assert tb0 is not None and da_gui == [] and tb0.sent_via_zalo is False
+    # Cấu hình thread admin -> gửi đúng 1 lần, đánh dấu sent_via_zalo
+    client.put("/api/cai-dat", json={"thong_bao_admin_zalo_thread_id": "thread-admin-1"}, headers=headers())
+    tb1 = notification_service.notify(db, "du_thong_tin", "Đủ thông tin test", "x", customer_id=cid, channel="ca_nhan")
+    assert tb1 is not None and tb1.sent_via_zalo is True
+    assert da_gui and da_gui[0][0] == "thread-admin-1" and len(da_gui) == 1
+    # Gửi tiếp ngay (< 60 giây) -> vẫn tạo thông báo trong DB nhưng không gửi Zalo nữa
+    tb2 = notification_service.notify(db, "bot_khong_tra_loi_duoc", "Bot lỗi test", "x", customer_id=cid, channel="ca_nhan")
+    assert tb2 is not None and tb2.sent_via_zalo is False and len(da_gui) == 1
+    db.close()
+    # Dọn cấu hình về mặc định cho các test sau
+    client.put("/api/cai-dat", json={"thong_bao_admin_zalo_thread_id": ""}, headers=headers())
+
+def test_40_trich_xuat_ai_va_thong_bao_du_thong_tin(monkeypatch):
+    from app.services import extraction_service
+    monkeypatch.setattr(extraction_service, "trich_xuat_ai",
+                        lambda db, content: {"nhu_cau": "cần mua gói chăm sóc khách hàng",
+                                             "dich_vu_quan_tam": "Dịch vụ chăm sóc khách hàng"})
+    r = client.post("/api/zalo/mock/nhan-tin-nhan", json={"external_id": "msg-ai-1", "customer_external_id": "khach-ai-1", "customer_name": "Vũ E", "content": "Em cần mua gói, sđt của em 0912 345 678"}, headers=headers())
+    assert r.status_code == 200, r.text
+    kh = _khach_theo_external("khach-ai-1")
+    assert kh["phone"] == "0912345678"  # SĐT có khoảng trắng vẫn chuẩn hóa được
+    tt = client.get(f"/api/khach-hang/{kh['id']}/thong-tin-thu-thap", headers=headers()).json()
+    assert {"so_dien_thoai", "nhu_cau", "dich_vu_quan_tam"} <= {t["field"] for t in tt}
+    ai_fields = {t["field"]: t for t in tt}
+    assert ai_fields["nhu_cau"]["confidence"] == 0.7  # độ tin cậy của nguồn AI thấp hơn quy tắc
+    ds = client.get("/api/thong-bao", headers=headers()).json()
+    assert any(n["customer_id"] == kh["id"] and n["type"] == "du_thong_tin" for n in ds)
+    # Đánh dấu tất cả đã đọc
+    dem = client.get("/api/thong-bao/dem-chua-doc", headers=headers()).json()["chua_doc"]
+    assert dem >= 1
+    client.post("/api/thong-bao/danh-dau-tat-ca-da-doc", headers=headers())
+    assert client.get("/api/thong-bao/dem-chua-doc", headers=headers()).json()["chua_doc"] == 0
+
 def test_32_gui_that_thatbai_ghi_loi_gui(monkeypatch):
     from app.services import orchestrator
     class FakePersonalLoi:

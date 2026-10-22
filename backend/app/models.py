@@ -27,7 +27,7 @@ class AIProviderConfig(Base):
 class Customer(Base):
     __tablename__ = "customers"
     id = Column(Integer, primary_key=True); external_id = Column(String, unique=True, index=True)
-    display_name = Column(String, default=""); phone = Column(String, default="")
+    display_name = Column(String, default=""); phone = Column(String, default=""); email = Column(String, default="")
     labels = Column(String, default="")  # phẩy phân cách
     group_name = Column(String, default=""); notes = Column(Text, default="")
     assignee = Column(String, default=""); last_interaction_at = Column(DateTime, default=now)
@@ -132,6 +132,40 @@ class SystemSetting(Base):
     key = Column(String, primary_key=True)
     value = Column(Text, default="")
     updated_at = Column(DateTime, default=now, onupdate=now)
+
+class CollectedInfo(Base):
+    """Thông tin khách hàng do bot tự thu thập từ hội thoại (GĐ mở rộng 1).
+
+    Mỗi giá trị trích xuất được là một bản ghi riêng, có nguồn tin nhắn + độ
+    tin cậy + trạng thái xác minh, không ghi đè im lặng lên hồ sơ khách.
+    """
+    __tablename__ = "thong_tin_thu_thap"
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), index=True, nullable=False)
+    # ho_ten, so_dien_thoai, email, nhu_cau, dich_vu_quan_tam, ngan_sach,
+    # thoi_gian_mong_muon, dia_chi, ghi_chu
+    field = Column(String, nullable=False, index=True)
+    value = Column(Text, default="")
+    source_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
+    confidence = Column(Float, default=0.8)
+    verified = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=now); updated_at = Column(DateTime, default=now, onupdate=now)
+    customer = relationship("Customer")
+
+class Notification(Base):
+    """Thông báo cho quản trị viên (GĐ mở rộng 1): sự kiện nghiệp vụ quan trọng."""
+    __tablename__ = "thong_bao"
+    id = Column(Integer, primary_key=True)
+    # khach_moi, co_so_dien_thoai, du_thong_tin, gap_nhan_vien, khieu_nai,
+    # bot_khong_tra_loi_duoc, loi_he_thong
+    type = Column(String, nullable=False, index=True)
+    title = Column(String, default=""); content = Column(Text, default="")
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True, index=True)
+    level = Column(String, default="thong_tin")  # thong_tin, canh_bao, khan_cap
+    is_read = Column(Boolean, default=False, index=True)
+    sent_via_zalo = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=now)
 
 class BackupRecord(Base):
     __tablename__ = "backups"

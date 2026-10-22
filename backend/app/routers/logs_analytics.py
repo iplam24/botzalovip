@@ -127,6 +127,51 @@ def xuat_csv(tu_ngay: str = "", den_ngay: str = "", db: Session = Depends(get_db
     )
 
 
+@router.get("/api/phan-tich/xuat-excel")
+def xuat_excel(tu_ngay: str = "", den_ngay: str = "", db: Session = Depends(get_db), u: User = Depends(get_current_user)):
+    """Xuất báo cáo phân tích tổng hợp ra .xlsx (sheet Số liệu + sheet Lượt gọi AI)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    so_lieu = tinh_phan_tich(db, tu_ngay, den_ngay)
+    nhan = {
+        "tong_tin_nhan": "Tổng tin nhắn", "tin_nhan_khach": "Tin nhắn khách gửi",
+        "tin_nhan_bot": "Tin nhắn bot gửi", "tin_nhan_nhan_vien": "Tin nhắn nhân viên gửi",
+        "ty_le_bot": "Tỷ lệ bot trả lời", "tong_hoi_thoai": "Tổng hội thoại",
+        "hoi_thoai_chuyen_nhan_vien": "Hội thoại chuyển nhân viên",
+        "luot_goi_ai": "Số lượt gọi AI", "loi_ai": "Số lượt gọi AI lỗi",
+        "tong_token_prompt": "Tổng token đầu vào", "tong_token_completion": "Tổng token đầu ra",
+        "chi_phi_uoc_tinh": "Chi phí AI ước tính", "tong_khach_hang": "Tổng khách hàng",
+        "tong_tai_lieu": "Tổng tài liệu tri thức", "tong_bo_nho": "Tổng ký ức",
+        "tong_quy_tac": "Tổng quy tắc tự động hóa", "tong_lan_chay_quy_tac": "Tổng lần chạy quy tắc",
+    }
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Số liệu"
+    ws.append(["Chỉ số", "Giá trị"])
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    for khoa, gia_tri in so_lieu.items():
+        ws.append([nhan.get(khoa, khoa), gia_tri])
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 20
+    ws2 = wb.create_sheet("Lượt gọi AI")
+    ws2.append(["Thời gian", "Mô hình", "Token đầu vào", "Token đầu ra", "Chi phí ước tính", "Trạng thái", "Lỗi"])
+    for cell in ws2[1]:
+        cell.font = Font(bold=True)
+    for x in db.query(AIUsage).order_by(AIUsage.id.desc()).limit(500).all():
+        ws2.append([x.created_at.strftime("%d/%m/%Y %H:%M") if x.created_at else "", x.model,
+                    x.prompt_tokens, x.completion_tokens, x.estimated_cost, x.status, x.error or ""])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    ten_file = f"bao-cao-phan-tich-{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{ten_file}"'},
+    )
+
+
 @router.get("/api/nhat-ky")
 def logs(
     muc_do: str = Query(default="", description="Lọc theo mức độ: info, warning, error"),

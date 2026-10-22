@@ -7,23 +7,28 @@ from .models import User, AIProviderConfig, ZaloAccount, SystemLog
 from .security import hash_password, encrypt_secret
 import os
 from .config import settings
-from .routers import auth, ai_providers, customers, conversations, services_router, knowledge, memories, automation, zalo, logs_analytics, backup, ai_test, cai_dat
+from .routers import auth, ai_providers, customers, conversations, services_router, knowledge, memories, automation, zalo, logs_analytics, backup, ai_test, cai_dat, notifications
 
 app = FastAPI(title="Zalo AI Hub", description="Nền tảng AI tự động hóa Zalo - giao diện và API tiếng Việt", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://localhost:3000"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-for r in [auth.router, ai_providers.router, customers.router, conversations.router, services_router.router, knowledge.router, memories.router, automation.router, zalo.router, logs_analytics.router, backup.router, ai_test.router, cai_dat.router]:
+for r in [auth.router, ai_providers.router, customers.router, conversations.router, services_router.router, knowledge.router, memories.router, automation.router, zalo.router, logs_analytics.router, backup.router, ai_test.router, cai_dat.router, notifications.router]:
     app.include_router(r)
 
 def seed():
     Base.metadata.create_all(bind=engine)
-    # Nâng cấp nhẹ cho DB đã tồn tại: thêm cột channel vào conversations nếu chưa có
+    # Nâng cấp nhẹ cho DB đã tồn tại: thêm cột channel vào conversations, email vào customers nếu chưa có
     try:
         from sqlalchemy import inspect, text
-        cols = [c["name"] for c in inspect(engine).get_columns("conversations")]
+        insp = inspect(engine)
+        cols = [c["name"] for c in insp.get_columns("conversations")]
         if "channel" not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE conversations ADD COLUMN channel VARCHAR DEFAULT 'mo_phong'"))
+        cust_cols = [c["name"] for c in insp.get_columns("customers")]
+        if "email" not in cust_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE customers ADD COLUMN email VARCHAR DEFAULT ''"))
     except Exception:
         pass
     db = SessionLocal()

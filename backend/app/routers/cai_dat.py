@@ -7,6 +7,9 @@ Các khóa được hỗ trợ (có giá trị mặc định khi chưa lưu):
 - mui_gio (str): múi giờ hiển thị, mặc định Asia/Ho_Chi_Minh
 - so_tin_nhan_ngu_canh (int): số tin gần nhất đưa vào ngữ cảnh AI
 - ten_hien_thi_bot (str): tên/xưng hô của bot khi trả lời
+- thong_bao_admin_zalo_thread_id (str): thread Zalo cá nhân của admin nhận thông báo (rỗng = không gửi Zalo)
+- thong_bao_<loai> (bool): bật/tắt từng loại thông báo admin (khach_moi, co_so_dien_thoai,
+  du_thong_tin, gap_nhan_vien, khieu_nai, bot_khong_tra_loi_duoc, loi_he_thong)
 """
 import json
 from fastapi import APIRouter, Depends
@@ -26,6 +29,14 @@ MAC_DINH = {
     "mui_gio": "Asia/Ho_Chi_Minh",
     "so_tin_nhan_ngu_canh": 10,
     "ten_hien_thi_bot": "Trợ lý hỗ trợ khách hàng",
+    "thong_bao_admin_zalo_thread_id": "",
+    "thong_bao_khach_moi": True,
+    "thong_bao_co_so_dien_thoai": True,
+    "thong_bao_du_thong_tin": True,
+    "thong_bao_gap_nhan_vien": True,
+    "thong_bao_khieu_nai": True,
+    "thong_bao_bot_khong_tra_loi_duoc": True,
+    "thong_bao_loi_he_thong": True,
 }
 
 
@@ -36,6 +47,14 @@ class CaiDatIn(BaseModel):
     mui_gio: Optional[str] = None
     so_tin_nhan_ngu_canh: Optional[int] = None
     ten_hien_thi_bot: Optional[str] = None
+    thong_bao_admin_zalo_thread_id: Optional[str] = None
+    thong_bao_khach_moi: Optional[bool] = None
+    thong_bao_co_so_dien_thoai: Optional[bool] = None
+    thong_bao_du_thong_tin: Optional[bool] = None
+    thong_bao_gap_nhan_vien: Optional[bool] = None
+    thong_bao_khieu_nai: Optional[bool] = None
+    thong_bao_bot_khong_tra_loi_duoc: Optional[bool] = None
+    thong_bao_loi_he_thong: Optional[bool] = None
 
 
 def doc_cai_dat(db: Session) -> dict:

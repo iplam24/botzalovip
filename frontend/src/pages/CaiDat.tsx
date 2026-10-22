@@ -52,6 +52,14 @@ export default function CaiDat() {
           mui_gio: form.mui_gio,
           so_tin_nhan_ngu_canh: Number(form.so_tin_nhan_ngu_canh) || 10,
           ten_hien_thi_bot: form.ten_hien_thi_bot || "",
+          thong_bao_admin_zalo_thread_id: form.thong_bao_admin_zalo_thread_id || "",
+          thong_bao_khach_moi: !!form.thong_bao_khach_moi,
+          thong_bao_co_so_dien_thoai: !!form.thong_bao_co_so_dien_thoai,
+          thong_bao_du_thong_tin: !!form.thong_bao_du_thong_tin,
+          thong_bao_gap_nhan_vien: !!form.thong_bao_gap_nhan_vien,
+          thong_bao_khieu_nai: !!form.thong_bao_khieu_nai,
+          thong_bao_bot_khong_tra_loi_duoc: !!form.thong_bao_bot_khong_tra_loi_duoc,
+          thong_bao_loi_he_thong: !!form.thong_bao_loi_he_thong,
         }),
       });
       setForm(kq);
@@ -121,6 +129,37 @@ export default function CaiDat() {
                 placeholder="Ví dụ: Trợ lý hỗ trợ khách hàng" />
               <span className="text-xs text-gray-400">Danh tính bot được khóa trong lời nhắc hệ thống — mô hình không tự giới thiệu sai danh tính.</span>
             </Truong>
+          </div>
+        </section>
+
+        <section className="bg-white dark:bg-neutral-900 rounded shadow p-5">
+          <h2 className="font-bold mb-3">Thông báo cho quản trị viên</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Thông báo luôn được ghi vào Trung tâm thông báo (mục “Thông báo” + chuông ở thanh trên).
+            Nếu điền ID hội thoại admin, hệ thống còn gửi thêm qua Zalo cá nhân (chỉ với sự kiện từ kênh cá nhân,
+            tối thiểu 60 giây giữa hai lần gửi để chống spam). Tắt từng loại nếu không muốn nhận.
+          </p>
+          <Truong nhan="ID hội thoại Zalo của admin (để trống = không gửi qua Zalo)">
+            <input className={oNhap} value={form.thong_bao_admin_zalo_thread_id || ""}
+              onChange={dat("thong_bao_admin_zalo_thread_id")}
+              placeholder="ID thread Zalo cá nhân của admin" />
+            <span className="text-xs text-gray-400">Là định danh cuộc trò chuyện Zalo mà tài khoản bot dùng để nhắn cho admin.</span>
+          </Truong>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-3">
+            {[
+              ["thong_bao_khach_moi", "Khách hàng mới nhắn tin lần đầu"],
+              ["thong_bao_co_so_dien_thoai", "Khách để lại số điện thoại"],
+              ["thong_bao_du_thong_tin", "Đã thu thập đủ thông tin khách"],
+              ["thong_bao_gap_nhan_vien", "Khách yêu cầu gặp nhân viên"],
+              ["thong_bao_khieu_nai", "Khách có dấu hiệu khiếu nại"],
+              ["thong_bao_bot_khong_tra_loi_duoc", "Bot không trả lời được (lỗi AI)"],
+              ["thong_bao_loi_he_thong", "Lỗi hệ thống / lỗi gửi tin"],
+            ].map(([khoa, nhan]) => (
+              <label key={khoa} className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={!!form[khoa]} onChange={dat(khoa)} />
+                {nhan}
+              </label>
+            ))}
           </div>
         </section>
 

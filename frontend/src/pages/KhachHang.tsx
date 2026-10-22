@@ -1,8 +1,171 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { api, dinhDangThoiGian } from "../lib/api";
+import { api, apiTaiFile, dinhDangThoiGian, taiBlobXuong } from "../lib/api";
 import {
   ChuaCoDuLieu, DangTai, HopBieuMau, HopXacNhan, LoiTai, Nut, ThongBao, TieuDeTrang, Truong, oNhap,
 } from "../components/dungChung";
+
+// Nhãn tiếng Việt cho các trường thông tin thu thập tự động (GĐ mở rộng 1)
+const NHAN_TRUONG_THU_THAP: Record<string, string> = {
+  ho_ten: "Họ tên",
+  so_dien_thoai: "Số điện thoại",
+  email: "Email",
+  nhu_cau: "Nhu cầu",
+  dich_vu_quan_tam: "Dịch vụ quan tâm",
+  ngan_sach: "Ngân sách",
+  thoi_gian_mong_muon: "Thời gian mong muốn",
+  dia_chi: "Địa chỉ",
+  ghi_chu: "Ghi chú",
+};
+
+// Panel thông tin thu thập của 1 khách: bot tự bóc tách từ hội thoại,
+// nhân viên xem/sửa/xác minh/thêm tay/xóa được.
+function BangThongTinThuThap({ khach, baoLoi }: { khach: any; baoLoi: (text: string) => void }) {
+  const [ds, setDs] = useState<any[]>([]);
+  const [dangTai, setDangTai] = useState(true);
+  const [truongMoi, setTruongMoi] = useState("nhu_cau");
+  const [giaTriMoi, setGiaTriMoi] = useState("");
+  const [suaId, setSuaId] = useState<number | null>(null);
+  const [giaTriSua, setGiaTriSua] = useState("");
+
+  const tai = useCallback(async () => {
+    setDangTai(true);
+    try {
+      setDs(await api(`/api/khach-hang/${khach.id}/thong-tin-thu-thap`));
+    } catch (e: any) {
+      baoLoi(e.message);
+    } finally {
+      setDangTai(false);
+    }
+  }, [khach.id, baoLoi]);
+
+  useEffect(() => { tai(); }, [tai]);
+
+  const them = async () => {
+    if (!giaTriMoi.trim()) return;
+    try {
+      await api(`/api/khach-hang/${khach.id}/thong-tin-thu-thap`, {
+        method: "POST",
+        body: JSON.stringify({ field: truongMoi, value: giaTriMoi.trim() }),
+      });
+      setGiaTriMoi("");
+      await tai();
+    } catch (e: any) {
+      baoLoi(e.message);
+    }
+  };
+
+  const xacMinh = async (t: any) => {
+    try {
+      await api(`/api/khach-hang/${khach.id}/thong-tin-thu-thap/${t.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ verified: true }),
+      });
+      await tai();
+    } catch (e: any) {
+      baoLoi(e.message);
+    }
+  };
+
+  const luuSua = async (t: any) => {
+    try {
+      await api(`/api/khach-hang/${khach.id}/thong-tin-thu-thap/${t.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ value: giaTriSua }),
+      });
+      setSuaId(null);
+      await tai();
+    } catch (e: any) {
+      baoLoi(e.message);
+    }
+  };
+
+  const xoa = async (t: any) => {
+    try {
+      await api(`/api/khach-hang/${khach.id}/thong-tin-thu-thap/${t.id}`, { method: "DELETE" });
+      await tai();
+    } catch (e: any) {
+      baoLoi(e.message);
+    }
+  };
+
+  if (dangTai) return <DangTai text="Đang tải thông tin thu thập..." />;
+  return (
+    <div>
+      {ds.length === 0 ? (
+        <p className="text-sm text-gray-500 mb-3">
+          Chưa thu thập được thông tin nào. Bot sẽ tự bóc tách số điện thoại, email, nhu cầu... từ các tin nhắn tiếp theo của khách.
+        </p>
+      ) : (
+        <table className="min-w-full text-sm mb-3">
+          <thead>
+            <tr className="text-left bg-gray-50 dark:bg-neutral-800">
+              <th className="p-2 border-b">Trường</th>
+              <th className="p-2 border-b">Giá trị</th>
+              <th className="p-2 border-b">Độ tin cậy</th>
+              <th className="p-2 border-b">Trạng thái</th>
+              <th className="p-2 border-b">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ds.map((t) => (
+              <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-neutral-800">
+                <td className="p-2 border-b font-medium whitespace-nowrap">{NHAN_TRUONG_THU_THAP[t.field] || t.field}</td>
+                <td className="p-2 border-b">
+                  {suaId === t.id ? (
+                    <input className={oNhap} value={giaTriSua} onChange={(e) => setGiaTriSua(e.target.value)} autoFocus />
+                  ) : (
+                    <>
+                      {t.value}
+                      <span className="block text-xs text-gray-400">
+                        {t.source_message_id ? `Từ tin nhắn #${t.source_message_id}` : "Nhập tay"} · {dinhDangThoiGian(t.created_at)}
+                      </span>
+                    </>
+                  )}
+                </td>
+                <td className="p-2 border-b whitespace-nowrap">{Math.round((t.confidence ?? 0) * 100)}%</td>
+                <td className="p-2 border-b whitespace-nowrap">
+                  {t.verified
+                    ? <span className="inline-block bg-green-100 text-green-800 px-2 py-0.5 rounded-full text-xs font-medium">Đã xác minh</span>
+                    : <span className="inline-block bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-xs font-medium">Chưa xác minh</span>}
+                </td>
+                <td className="p-2 border-b whitespace-nowrap">
+                  {suaId === t.id ? (
+                    <>
+                      <button className="text-blue-600 hover:underline mr-3" onClick={() => luuSua(t)}>Lưu</button>
+                      <button className="text-gray-500 hover:underline" onClick={() => setSuaId(null)}>Hủy</button>
+                    </>
+                  ) : (
+                    <>
+                      {!t.verified && (
+                        <button className="text-green-700 hover:underline mr-3" onClick={() => xacMinh(t)}>Xác minh</button>
+                      )}
+                      <button className="text-blue-600 hover:underline mr-3" onClick={() => { setSuaId(t.id); setGiaTriSua(t.value); }}>Sửa</button>
+                      <button className="text-red-600 hover:underline" onClick={() => xoa(t)}>Xóa</button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="flex gap-2 items-end border-t pt-3">
+        <div className="w-44">
+          <span className="block text-sm font-medium mb-1">Thêm trường</span>
+          <select className={oNhap} value={truongMoi} onChange={(e) => setTruongMoi(e.target.value)}>
+            {Object.entries(NHAN_TRUONG_THU_THAP).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+        </div>
+        <input className={oNhap} placeholder="Giá trị..." value={giaTriMoi}
+          onChange={(e) => setGiaTriMoi(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); them(); } }} />
+        <Nut onClick={them} disabled={!giaTriMoi.trim()}>Thêm</Nut>
+      </div>
+    </div>
+  );
+}
 
 // Quản lý khách hàng: bảng + tìm kiếm + form thêm/sửa đầy đủ + xóa có xác nhận (chỉ quản trị viên xóa được ở backend).
 const FORM_TRONG = { display_name: "", phone: "", labels: "", group_name: "", notes: "", assignee: "", external_id: "" };
@@ -18,6 +181,8 @@ export default function KhachHang() {
   const [dangLuu, setDangLuu] = useState(false);
   const [xoaId, setXoaId] = useState<number | null>(null);
   const [dangXoa, setDangXoa] = useState(false);
+  const [dangXuat, setDangXuat] = useState(false);
+  const [khachThuThap, setKhachThuThap] = useState<any | null>(null);
   const [thongBao, setThongBao] = useState<{ loai: "thanh_cong" | "loi"; text: string } | null>(null);
 
   const tai = useCallback(async () => {
@@ -90,9 +255,24 @@ export default function KhachHang() {
 
   const dat = (k: string) => (e: any) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const xuatExcel = async () => {
+    setDangXuat(true);
+    try {
+      const thamSo = tuKhoa.trim() ? `?tu_khoa=${encodeURIComponent(tuKhoa.trim())}` : "";
+      const { blob, tenFile } = await apiTaiFile(`/api/khach-hang/xuat-excel${thamSo}`);
+      taiBlobXuong(blob, tenFile);
+      setThongBao({ loai: "thanh_cong", text: "Đã xuất danh sách khách hàng ra Excel (kèm thông tin thu thập chính)." });
+    } catch (e: any) {
+      setThongBao({ loai: "loi", text: `Xuất Excel thất bại: ${e.message}` });
+    } finally {
+      setDangXuat(false);
+    }
+  };
+
   return (
     <div className="p-6">
       <TieuDeTrang tieuDe="Khách hàng" moTa="Hồ sơ khách hàng thống nhất từ mọi kênh hội thoại. Không tự suy đoán thuộc tính nhạy cảm.">
+        <Nut mau="xam" onClick={xuatExcel} disabled={dangXuat}>{dangXuat ? "Đang xuất..." : "Xuất Excel"}</Nut>
         <Nut onClick={moThem}>+ Thêm khách hàng</Nut>
       </TieuDeTrang>
       {thongBao && <ThongBao loai={thongBao.loai}>{thongBao.text}</ThongBao>}
@@ -134,6 +314,7 @@ export default function KhachHang() {
                     <td className="p-3 border-b">{c.assignee || "—"}</td>
                     <td className="p-3 border-b whitespace-nowrap">{dinhDangThoiGian(c.last_interaction_at)}</td>
                     <td className="p-3 border-b whitespace-nowrap">
+                      <button className="text-emerald-700 hover:underline mr-3" onClick={() => setKhachThuThap(c)}>Thông tin thu thập</button>
                       <button className="text-blue-600 hover:underline mr-3" onClick={() => moSua(c)}>Sửa</button>
                       <button className="text-red-600 hover:underline" onClick={() => setXoaId(c.id)}>Xóa</button>
                     </td>
@@ -177,6 +358,20 @@ export default function KhachHang() {
             <Nut type="submit" disabled={dangLuu}>{dangLuu ? "Đang lưu..." : "Lưu khách hàng"}</Nut>
           </div>
         </form>
+      </HopBieuMau>
+
+      <HopBieuMau
+        mo={khachThuThap !== null}
+        tieuDe={`Thông tin thu thập — ${khachThuThap?.display_name || (khachThuThap ? `#${khachThuThap.id}` : "")}`}
+        onDong={() => setKhachThuThap(null)}
+        rong="max-w-3xl"
+      >
+        {khachThuThap && (
+          <BangThongTinThuThap
+            khach={khachThuThap}
+            baoLoi={(text) => setThongBao({ loai: "loi", text })}
+          />
+        )}
       </HopBieuMau>
 
       <HopXacNhan
