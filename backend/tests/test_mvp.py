@@ -311,7 +311,7 @@ def test_31_webhook_ca_nhan_gui_that_qua_connector_ca_nhan(monkeypatch):
     from app.services import orchestrator
     sent = []
     class FakePersonal:
-        def send_text(self, thread_id, text):
+        def send_text(self, thread_id, text, loai_thread=0):
             sent.append((thread_id, text)); return {"thanh_cong": True}
     monkeypatch.setattr(orchestrator, "ZaloPersonalConnector", lambda: FakePersonal())
     payload = {"external_id": "wh-cn-001", "customer_external_id": "khach-ca-nhan-1", "customer_name": "Khách Cá Nhân", "content": "xin chào shop"}
@@ -415,7 +415,7 @@ def test_39_gui_thong_bao_zalo_cho_admin_co_cong_tac(monkeypatch):
     from app.services import notification_service
     da_gui = []
     class FakePersonal:
-        def send_text(self, thread_id, text):
+        def send_text(self, thread_id, text, loai_thread=0):
             da_gui.append((thread_id, text)); return {"thanh_cong": True}
     monkeypatch.setattr(notification_service, "ZaloPersonalConnector", lambda: FakePersonal())
     r = client.post("/api/khach-hang", json={"display_name": "Khách Kiểm Thông Báo", "external_id": "khach-tb-1"}, headers=headers())
@@ -460,7 +460,7 @@ def test_40_trich_xuat_ai_va_thong_bao_du_thong_tin(monkeypatch):
 def test_32_gui_that_thatbai_ghi_loi_gui(monkeypatch):
     from app.services import orchestrator
     class FakePersonalLoi:
-        def send_text(self, thread_id, text): raise RuntimeError("sidecar tat")
+        def send_text(self, thread_id, text, loai_thread=0): raise RuntimeError("sidecar tat")
     monkeypatch.setattr(orchestrator, "ZaloPersonalConnector", lambda: FakePersonalLoi())
     payload = {"external_id": "wh-cn-002", "customer_external_id": "khach-ca-nhan-2", "customer_name": "Khách Lỗi", "content": "alo alo"}
     r = client.post("/api/zalo/webhook/ca-nhan", json=payload)
