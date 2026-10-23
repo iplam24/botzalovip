@@ -56,7 +56,7 @@ class _FakePersonal:
     def __init__(self, ghi):
         self.ghi = ghi
 
-    def send_text(self, thread_id, text):
+    def send_text(self, thread_id, text, loai_thread=0):
         self.ghi.append(("send_text", thread_id, text))
         return {"thanh_cong": True}
 
