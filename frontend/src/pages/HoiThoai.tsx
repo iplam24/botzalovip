@@ -39,10 +39,13 @@ function AnhDinhKem({ nguon }: { nguon: string }) {
     return () => { huy = true; if (objUrl) URL.revokeObjectURL(objUrl); };
   }, [nguon, noiBo]);
   if (loiAnh) {
+    // Ảnh local trả 404 = đã bị dọn theo chính sách lưu (so_ngay_luu_anh_khach)
+    // hoặc không tải được — hiện ô xám thay cho ảnh vỡ.
     return (
-      <p className="text-xs text-gray-500 mt-1">
-        <i className="fa-regular fa-image mr-1" />Không tải được ảnh đính kèm.
-      </p>
+      <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-gray-200 dark:bg-neutral-700 text-gray-500 dark:text-gray-300 px-3 py-2.5 text-xs max-w-[260px]">
+        <i className="fa-regular fa-image text-base" />
+        <span>Ảnh đã hết hạn lưu trữ</span>
+      </div>
     );
   }
   if (!urlHien) {
@@ -54,6 +57,25 @@ function AnhDinhKem({ nguon }: { nguon: string }) {
         className="mt-1.5 max-w-[260px] max-h-[260px] w-auto rounded-lg border dark:border-neutral-700 object-contain cursor-zoom-in"
         onError={() => setLoiAnh(true)} />
     </a>
+  );
+}
+
+// Sticker bot gửi: attachment_url chứa JSON sticker {id, cate_id, type, nhan,
+// url_xem_truoc}. Có ảnh xem trước thì hiện ảnh, không thì hiện nhãn [Sticker].
+function StickerDinhKem({ urlJson }: { urlJson: string }) {
+  let stk: any = null;
+  try { stk = JSON.parse(urlJson || ""); } catch { stk = null; }
+  const url = stk?.url_xem_truoc || "";
+  const nhan = stk?.nhan || "";
+  return (
+    <div className="mt-1.5">
+      {url ? (
+        <img src={url} alt={nhan || "Sticker"} className="max-w-[130px] max-h-[130px] w-auto object-contain" />
+      ) : null}
+      <p className="text-xs text-gray-500 mt-0.5">
+        <i className="fa-regular fa-face-smile mr-1" />[Sticker]{nhan ? ` ${nhan}` : ""}
+      </p>
+    </div>
   );
 }
 
@@ -326,7 +348,11 @@ export default function HoiThoai() {
                           <p className="text-[11px] font-medium text-gray-500 mb-0.5">
                             {NHAN_NGUOI_GUI[m.sender_type] || m.sender_type}
                           </p>
-                          <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
+                          {m.attachment_type === "sticker" ? (
+                            <StickerDinhKem urlJson={m.attachment_url || ""} />
+                          ) : (
+                            <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
+                          )}
                           {m.attachment_type === "anh" && m.attachment_url && (
                             <AnhDinhKem nguon={m.attachment_url} />
                           )}

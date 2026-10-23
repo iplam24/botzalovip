@@ -136,6 +136,62 @@ export default function TaiKhoanZalo() {
     }
   };
 
+  // --- Ảnh khách gửi: thống kê lưu trữ + dọn dẹp ngay (chính sách lưu ảnh) ---
+  const [thongKeAnh, setThongKeAnh] = useState<any>(null);
+  const [dangDonDep, setDangDonDep] = useState(false);
+  const taiThongKeAnh = useCallback(async () => {
+    try { setThongKeAnh(await api("/api/tep/thong-ke")); } catch { /* giữ số cũ */ }
+  }, []);
+  useEffect(() => { taiThongKeAnh(); }, [taiThongKeAnh]);
+  const donDepNgay = async () => {
+    setDangDonDep(true);
+    try {
+      const kq = await api("/api/tep/don-dep", { method: "POST" });
+      toast.thanhCong(`Đã dọn dẹp: xóa ${kq.da_xoa} ảnh, giải phóng ${kq.giai_phong_mb} MB.`);
+      await taiThongKeAnh();
+    } catch (e: any) {
+      toast.loi(e.message || "Dọn dẹp thất bại");
+    } finally {
+      setDangDonDep(false);
+    }
+  };
+
+  // --- Tìm sticker gợi ý (Zalo thật qua zca-js getStickers) để lấy id/cate_id/type ---
+  const [tuKhoaSticker, setTuKhoaSticker] = useState("");
+  const [goiYSticker, setGoiYSticker] = useState<any[] | null>(null);
+  const [loiSticker, setLoiSticker] = useState("");
+  const [dangTimSticker, setDangTimSticker] = useState(false);
+  const timSticker = async () => {
+    setDangTimSticker(true);
+    setLoiSticker("");
+    try {
+      const kq = await api(`/api/zalo/ca-nhan/sticker-goi-y?q=${encodeURIComponent(tuKhoaSticker.trim())}`);
+      setGoiYSticker(kq.ket_qua || []);
+    } catch (e: any) {
+      setGoiYSticker(null);
+      setLoiSticker(e.message || "Không tìm được sticker (kiểm tra kết nối Zalo cá nhân)");
+    } finally {
+      setDangTimSticker(false);
+    }
+  };
+  const themStickerVaoDanhSachBot = async (s: any) => {
+    try {
+      const cd = await api("/api/cai-dat");
+      let ds: any[] = [];
+      try { ds = JSON.parse(cd.danh_sach_sticker || "[]"); } catch { ds = []; }
+      if (!Array.isArray(ds)) ds = [];
+      if (ds.some((x: any) => Number(x.id) === Number(s.id))) {
+        toast.thongTin("Sticker này đã có trong danh sách của bot rồi.");
+        return;
+      }
+      ds.push({ id: Number(s.id), cate_id: Number(s.cate_id || 0), type: Number(s.type || 1), nhan: s.nhan || "", url_xem_truoc: s.url_xem_truoc || "" });
+      await api("/api/cai-dat", { method: "PUT", body: JSON.stringify({ danh_sach_sticker: JSON.stringify(ds) }) });
+      toast.thanhCong("Đã thêm sticker vào danh sách của bot. Nhớ bật 'Bot gửi sticker' trong Cài đặt nếu chưa bật.");
+    } catch (e: any) {
+      toast.loi(e.message || "Không thêm được sticker");
+    }
+  };
+
   const trangThaiCaNhan = tt?.trang_thai || "mat_ket_noi";
   const nhanCaNhan = NHAN_TRANG_THAI_CA_NHAN[trangThaiCaNhan] || trangThaiCaNhan;
   const qr = tt?.qr_base64 || "";
@@ -269,6 +325,69 @@ export default function TaiKhoanZalo() {
         onDong={() => setMoXacNhanNgatLienKet(false)}
         onXacNhan={ngatLienKet}
       />
+
+      {/* Ảnh khách gửi — thống kê lưu trữ + dọn dẹp */}
+      <section className="bg-white dark:bg-neutral-900 p-5 rounded shadow">
+        <h2 className="font-bold text-lg mb-2">Ảnh khách gửi — lưu trữ trên máy chủ</h2>
+        <p className="text-sm text-gray-500 mb-3">
+          Ảnh khách gửi được tải về máy chủ để bot xem được ảnh. Để không nặng máy chủ, hệ thống tự xóa ảnh cũ
+          (hệ thống nền chạy mỗi 24 giờ theo hạn lưu cấu hình ở Cài đặt → "Số ngày lưu ảnh khách gửi").
+          Ảnh đã hết hạn sẽ hiện ô "Ảnh đã hết hạn lưu trữ" trong trang Hội thoại.
+        </p>
+        {thongKeAnh ? (
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <span>Số ảnh đang lưu: <b>{thongKeAnh.so_anh}</b></span>
+            <span>Dung lượng: <b>{thongKeAnh.tong_mb} MB</b></span>
+            <span>Hạn lưu hiện tại: <b>{thongKeAnh.so_ngay_luu} ngày</b></span>
+            <Nut onClick={donDepNgay} disabled={dangDonDep}>
+              {dangDonDep ? "Đang dọn..." : "Dọn dẹp ngay"}
+            </Nut>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">Đang tải thống kê ảnh...</p>
+        )}
+      </section>
+
+      {/* Tìm sticker gợi ý cho bot */}
+      <section className="bg-white dark:bg-neutral-900 p-5 rounded shadow">
+        <h2 className="font-bold text-lg mb-2">Tìm sticker cho bot</h2>
+        <p className="text-sm text-gray-500 mb-3">
+          Tra sticker thật trên Zalo (theo từ khóa) để lấy đúng thông số <code>id / cate_id / type</code>.
+          Bấm "Thêm vào danh sách bot" là sticker được đưa vào cài đặt danh sách sticker — bot sẽ gửi ngẫu nhiên
+          sau câu trả lời khi bật "Bot gửi sticker" trong Cài đặt. Cần Zalo cá nhân đang kết nối.
+        </p>
+        <div className="flex gap-2">
+          <input className={oNhap} value={tuKhoaSticker} onChange={(e) => setTuKhoaSticker(e.target.value)}
+            placeholder="Từ khóa sticker, ví dụ: vui, mèo, cảm ơn..."
+            onKeyDown={(e) => { if (e.key === "Enter") timSticker(); }} />
+          <Nut onClick={timSticker} disabled={dangTimSticker}>
+            {dangTimSticker ? "Đang tìm..." : "Tìm sticker gợi ý"}
+          </Nut>
+        </div>
+        {loiSticker && <p className="text-sm text-red-600 mt-3">{loiSticker}</p>}
+        {goiYSticker !== null && !loiSticker && (
+          goiYSticker.length === 0 ? (
+            <p className="text-sm text-gray-500 mt-3">Không tìm thấy sticker nào với từ khóa này.</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-3">
+              {goiYSticker.map((s: any) => (
+                <div key={s.id} className="border dark:border-neutral-700 rounded-lg p-2 text-center">
+                  {s.url_xem_truoc ? (
+                    <img src={s.url_xem_truoc} alt={s.nhan || "Sticker"} className="mx-auto h-20 w-20 object-contain" />
+                  ) : (
+                    <div className="h-20 flex items-center justify-center text-3xl text-gray-400"><i className="fa-regular fa-face-smile" /></div>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">id: {s.id} · cate: {s.cate_id} · type: {s.type}</p>
+                  {s.nhan && <p className="text-xs truncate" title={s.nhan}>{s.nhan}</p>}
+                  <button className="mt-1.5 text-xs text-blue-600 hover:underline" onClick={() => themStickerVaoDanhSachBot(s)}>
+                    <i className="fa-solid fa-plus mr-1" />Thêm vào danh sách bot
+                  </button>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+      </section>
 
       {/* Khu 2: Mô phỏng */}
       <section className="bg-white dark:bg-neutral-900 p-5 rounded shadow">

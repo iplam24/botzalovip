@@ -18,7 +18,9 @@
   bộ nhớ tư vấn, tắt hỏi SĐT + tắt thông báo lead; luật nhóm, từ khóa cấm,
   chuyển nhân viên, thả tim, chia tin, định dạng Zalo vẫn áp dụng như thường.
 """
+import json
 import os
+import random
 import time
 import uuid
 from datetime import datetime, timezone
@@ -385,6 +387,111 @@ def _tin_khach(customer_external_id, external_id, cli_msg_id, la_nhom):
             "cli_msg_id": str(cli_msg_id or ""), "loai_thread": 1 if la_nhom else 0}
 
 
+def tinh_do_tre(text, cai_dat) -> int:
+    """Độ trễ (mili-giây) trước khi gửi một phần tin theo chế độ tốc độ trả lời.
+
+    Hàm THUẦN (không I/O) để kiểm thử đơn vị:
+    - chế độ "ngay" -> 0 (gửi ngay, không hiện đang soạn tin).
+    - "tu_nhien": len(text) * toc_do_go_ms_moi_ky_tu.
+    - "cham": như tự nhiên nhưng nhân hệ số 2.
+    Kết quả luôn kẹp trong [do_tre_tra_loi_toi_thieu_ms, do_tre_tra_loi_toi_da_ms].
+    """
+    cd = cai_dat or {}
+    che_do = str(cd.get("che_do_toc_do_tra_loi") or "tu_nhien")
+    if che_do == "ngay":
+        return 0
+
+    def _so(khoa, mac_dinh):
+        try:
+            return float(cd.get(khoa) or mac_dinh)
+        except (TypeError, ValueError):
+            return float(mac_dinh)
+
+    ms_moi_ky_tu = _so("toc_do_go_ms_moi_ky_tu", 30)
+    toi_thieu = _so("do_tre_tra_loi_toi_thieu_ms", 800)
+    toi_da = max(toi_thieu, _so("do_tre_tra_loi_toi_da_ms", 6000))
+    he_so = 2.0 if che_do == "cham" else 1.0
+    tho = len(text or "") * ms_moi_ky_tu * he_so
+    return int(min(max(tho, toi_thieu), toi_da))
+
+
+def _doc_danh_sach_sticker(cai_dat, db=None, trace=""):
+    """Đọc + chuẩn hoá cài đặt danh_sach_sticker (JSON mảng [{id, cate_id, type, nhan}]).
+    JSON hỏng/không phải mảng -> trả [] và ghi log cảnh báo (bot bỏ qua sticker)."""
+    tho = (cai_dat or {}).get("danh_sach_sticker")
+    if not tho:
+        return []
+    try:
+        ds = json.loads(tho) if isinstance(tho, str) else tho
+    except (TypeError, ValueError):
+        ds = None
+    if not isinstance(ds, list):
+        if db is not None:
+            db.add(SystemLog(level="warning", module="sticker",
+                             message="Cài đặt danh_sach_sticker không phải JSON mảng hợp lệ — bỏ qua gửi sticker",
+                             trace_id=trace))
+            db.commit()
+        return []
+    sach = []
+    for x in ds:
+        if isinstance(x, dict) and x.get("id"):
+            sach.append({
+                "id": x.get("id"),
+                "cate_id": x.get("cate_id", x.get("cateId", 0)),
+                "type": x.get("type", 1),
+                "nhan": x.get("nhan", ""),
+                "url_xem_truoc": x.get("url_xem_truoc") or x.get("url") or "",
+            })
+    return sach
+
+
+def _duoc_gui_sticker(cai_dat, danh_sach) -> bool:
+    """Tung xúc xắc theo xac_suat_gui_sticker (%) — tách riêng để kiểm thử
+    monkeypatch được module random của orchestrator."""
+    if not danh_sach:
+        return False
+    try:
+        xac_suat = float((cai_dat or {}).get("xac_suat_gui_sticker") or 0)
+    except (TypeError, ValueError):
+        xac_suat = 0.0
+    return random.random() * 100 < xac_suat
+
+
+def _gui_sticker_neu_may(db, conv, cust, cai_dat, tin_khach, trace):
+    """Gửi 1 sticker ngẫu nhiên SAU khi câu trả lời văn bản đã gửi xong.
+
+    Chỉ được gọi từ _send_reply khi ít nhất 1 phần tin đã gửi thành công ở
+    kênh ca_nhan (mọi cổng chặn — luật nhóm, bot tạm dừng, chuyển nhân viên —
+    đều nằm TRƯỚC _send_reply nên sticker không bao giờ lọt qua các cổng đó).
+    Lỗi gửi sticker chỉ ghi log, không làm hỏng câu trả lời.
+    """
+    try:
+        if not cai_dat.get("bot_gui_sticker"):
+            return
+        ds = _doc_danh_sach_sticker(cai_dat, db, trace)
+        if not _duoc_gui_sticker(cai_dat, ds):
+            return
+        sticker = random.choice(ds)
+        loai_thread = tin_khach.get("loai_thread", 0) if tin_khach else 0
+        try:
+            ZaloPersonalConnector().send_sticker(str(cust.external_id), sticker, loai_thread)
+        except Exception as e:
+            db.add(SystemLog(level="warning", module="sticker",
+                             message=f"Không gửi được sticker cho khách {cust.external_id}: {e}",
+                             trace_id=trace))
+            db.commit()
+            return
+        db.add(Message(conversation_id=conv.id, external_id=None, sender_type="bot",
+                       content="[sticker]", status="da_gui", attachment_type="sticker",
+                       attachment_url=json.dumps(sticker, ensure_ascii=False)))
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=None, intent="", channel="mo_phong",
                 cai_dat=None, tin_khach=None):
     cd = cai_dat if cai_dat is not None else _doc_cai_dat(db)
@@ -421,16 +528,25 @@ def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=N
         do_tre_ms = 700
     loi_cuoi = None
     so_phan_ok = 0
+    # Tốc độ trả lời (theo Cài đặt): chế độ "ngay" = gửi ngay không typing;
+    # "tu_nhien"/"cham" = hiện "đang soạn tin" (zca-js sendTypingEvent) rồi
+    # chờ theo độ dài phần tin (tinh_do_tre) trước khi gửi — như người thật gõ.
+    che_do_toc_do = str(cd.get("che_do_toc_do_tra_loi") or "tu_nhien")
     for idx, phan in enumerate(cac_phan):
         if idx > 0 and do_tre_ms > 0:
             time.sleep(do_tre_ms / 1000.0)
         try:
             if channel == "ca_nhan":
-                if cd.get("hieu_ung_dang_soan_tin"):
+                if che_do_toc_do != "ngay":
                     try:
                         ZaloPersonalConnector().typing(str(cust.external_id), 1 if (tin_khach and tin_khach.get("loai_thread")) else 0)
                     except Exception:
                         pass
+                    tre = tinh_do_tre(phan, cd)
+                    if idx > 0:
+                        tre = max(0, tre - do_tre_ms)  # đã nghỉ do_tre_ms ở trên
+                    if tre > 0:
+                        time.sleep(tre / 1000.0)
                 ZaloPersonalConnector().send_text(str(cust.external_id), phan)
             else:
                 mock_connector.send_text(str(conv.id), phan)
@@ -445,6 +561,11 @@ def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=N
         db.add(SystemLog(level="error", module="zalo", message=f"Lỗi gửi tin qua kênh {channel}: {loi_cuoi}", trace_id=trace)); db.commit()
         _thong_bao(db, "loi_he_thong", "Lỗi gửi tin qua connector", f"Gửi tin cho khách {cust.display_name or cust.external_id} qua kênh {channel} thất bại: {loi_cuoi}", cust, conv, "khan_cap", channel)
         return {**ket_qua_chung, "tra_loi": None, "ly_do": f"loi_connector: {loi_cuoi}"}
+    # Bot gửi sticker: chỉ kênh cá nhân, chỉ khi câu trả lời đã gửi thành công
+    # (áp dụng cho cả chế độ tư vấn lẫn trò chuyện tự do vì cả hai đều qua đây).
+    # Không cần typing cho sticker.
+    if channel == "ca_nhan":
+        _gui_sticker_neu_may(db, conv, cust, cd, tin_khach, trace)
     # Cập nhật bộ nhớ: ghi sự kiện tương tác
     if cd.get("module_bo_nho_ai", True) is not False:
         memory_service.remember(db, cust.id, f"Khách đã hỏi và được trả lời: {reply[:120]}", memory_type="su_kien", source="orchestrator", confidence=0.7)

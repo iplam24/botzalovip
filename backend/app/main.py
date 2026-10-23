@@ -116,8 +116,41 @@ def seed():
     finally:
         db.close()
 
+def _vong_don_dep_anh_khach():
+    """Luồng nền nhẹ: tự dọn ảnh khách quá hạn lưu (cài đặt so_ngay_luu_anh_khach).
+
+    Chạy 1 vòng sau khi khởi động ~2 phút rồi lặp mỗi 24 giờ. Đọc cài đặt
+    hiện tại ở mỗi vòng (đổi trên UI là vòng sau áp dụng ngay). Mọi lỗi đều
+    bị nuốt: dọn dẹp KHÔNG BAO GIỜ được làm sập ứng dụng chính.
+    """
+    import threading  # noqa: F401  (giữ import cục bộ cạnh luồng dùng nó)
+    import time as _time
+    _time.sleep(120)
+    while True:
+        try:
+            from .services import anh_service as _anh
+            from .routers.cai_dat import doc_cai_dat as _doc_cd
+            _db = SessionLocal()
+            try:
+                _cd = _doc_cd(_db)
+                try:
+                    _ngay = int(_cd.get("so_ngay_luu_anh_khach") or 7)
+                except (TypeError, ValueError):
+                    _ngay = 7
+                _anh.don_dep_anh_cu(_db, _ngay)
+            finally:
+                _db.close()
+        except Exception:
+            pass
+        _time.sleep(24 * 3600)
+
+
 @app.on_event("startup")
-def on_startup(): seed()
+def on_startup():
+    seed()
+    import threading
+    threading.Thread(target=_vong_don_dep_anh_khach, daemon=True,
+                     name="don-dep-anh-khach").start()
 
 @app.get("/api/suc-khoe-truc-tiep")
 def health_direct(): return {"trang_thai": "khoe"}

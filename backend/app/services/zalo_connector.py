@@ -12,11 +12,11 @@ class ZaloConnector(ABC):
     def send_text(self, conversation_external_id: str, text: str): pass
     def send_image(self, cid, url): raise NotImplementedError("Chưa hỗ trợ gửi hình ảnh")
     def react(self, mid, icon): raise NotImplementedError("Chưa hỗ trợ thả cảm xúc")
-    def send_sticker(self, cid, sid): raise NotImplementedError("Chưa hỗ trợ gửi sticker")
+    def send_sticker(self, thread_id, sticker, loai_thread=0): raise NotImplementedError("Chưa hỗ trợ gửi sticker")
     def get_conversation(self, cid): return {"id": cid}
 
 class MockZaloConnector(ZaloConnector):
-    def __init__(self): self.connected = True; self.sent = []; self.reactions = []; self.typings = []
+    def __init__(self): self.connected = True; self.sent = []; self.reactions = []; self.typings = []; self.stickers = []
     def connect(self): self.connected = True; return {"trang_thai": "da_ket_noi", "moi_truong": "mo_phong"}
     def disconnect(self): self.connected = False; return {"trang_thai": "da_ngat"}
     def status(self): return {"trang_thai": "da_ket_noi" if self.connected else "mat_ket_noi", "moi_truong": "mo_phong", "ho_tro": ["send_text"]}
@@ -27,6 +27,8 @@ class MockZaloConnector(ZaloConnector):
         self.reactions.append((str(thread_id), str(message_id), loai_thread)); return {"thanh_cong": True, "mo_phong": True}
     def typing(self, thread_id, loai_thread=0):
         self.typings.append((str(thread_id), loai_thread)); return {"thanh_cong": True, "mo_phong": True}
+    def send_sticker(self, thread_id, sticker, loai_thread=0):
+        self.stickers.append((str(thread_id), sticker, loai_thread)); return {"thanh_cong": True, "mo_phong": True}
 
 class ZaloOAStubConnector(ZaloConnector):
     """Zalo OA cần token OA/app chính thức. Thiếu token thì báo CHƯA HỖ TRỢ, không fake."""
@@ -103,9 +105,10 @@ class ZaloPersonalConnector(ZaloConnector):
         if code >= 400: raise RuntimeError(data.get("thong_bao", f"Sidecar trả lỗi {code}"))
         return data
     def typing(self, thread_id, loai_thread=0):
-        """Hiệu ứng 'đang soạn tin' qua zca-js sendTypingEvent (sidecar /dang-soan-tin)."""
+        """Hiệu ứng 'đang soạn tin' qua zca-js sendTypingEvent (sidecar POST /dang-soan).
+        Đã kiểm chứng source zca-js: sendTypingEvent(threadId, type) tồn tại thật."""
         try:
-            code, data = self._call("POST", "/dang-soan-tin", {"thread_id": str(thread_id), "loai_thread": int(loai_thread or 0)})
+            code, data = self._call("POST", "/dang-soan", {"thread_id": str(thread_id), "loai_thread": int(loai_thread or 0), "bat": True})
         except Exception as e:
             raise RuntimeError("Mất kết nối / Chưa chạy dịch vụ Zalo cá nhân") from e
         if code == 501: raise NotImplementedError(data.get("thong_bao", "Thư viện zca-js không hỗ trợ hiệu ứng đang soạn tin"))
@@ -139,12 +142,41 @@ class ZaloPersonalConnector(ZaloConnector):
         if code == 501: raise NotImplementedError(data.get("thong_bao", "Thư viện zca-js không hỗ trợ thả cảm xúc trong bản hiện tại"))
         if code >= 400: raise RuntimeError(data.get("thong_bao", f"Sidecar trả lỗi {code}"))
         return data
-    def send_sticker(self, cid, sticker_id=""):
+    def send_sticker(self, thread_id, sticker, loai_thread=0):
+        """Gửi 1 sticker qua sidecar POST /gui-sticker.
+
+        sticker: dict {id, cate_id, type} đúng thông số zca-js sendSticker
+        (thư viện nhận {id, cateId, type} — sidecar tự ánh xạ cate_id->cateId).
+        """
+        sticker = sticker or {}
         try:
-            code, data = self._call("POST", "/gui-sticker", {"thread_id": str(cid), "sticker_id": str(sticker_id)})
+            ma = {
+                "id": int(sticker.get("id") or 0),
+                "cate_id": int(sticker.get("cate_id", sticker.get("cateId", 0)) or 0),
+                "type": int(sticker.get("type") or 1),
+            }
+        except (TypeError, ValueError) as e:
+            raise RuntimeError("Thông số sticker không hợp lệ (id/cate_id/type phải là số)") from e
+        if not ma["id"]:
+            raise RuntimeError("Thiếu id sticker")
+        try:
+            code, data = self._call("POST", "/gui-sticker", {
+                "thread_id": str(thread_id), "loai_thread": int(loai_thread or 0), "sticker": ma,
+            })
         except Exception as e:
             raise RuntimeError("Mất kết nối / Chưa chạy dịch vụ Zalo cá nhân") from e
         if code == 501: raise NotImplementedError(data.get("thong_bao", "Thư viện zca-js không hỗ trợ gửi sticker trong bản hiện tại"))
         if code >= 400: raise RuntimeError(data.get("thong_bao", f"Sidecar trả lỗi {code}"))
         return data
+    def goi_y_sticker(self, tu_khoa=""):
+        """Tìm sticker gợi ý qua sidecar GET /sticker-goi-y (zca-js getStickers
+        + getStickersDetail). Trả list [{id, cate_id, type, nhan, url_xem_truoc}]."""
+        from urllib.parse import quote
+        try:
+            code, data = self._call("GET", f"/sticker-goi-y?q={quote(str(tu_khoa or ''))}")
+        except Exception as e:
+            raise RuntimeError("Mất kết nối / Chưa chạy dịch vụ Zalo cá nhân") from e
+        if code == 501: raise NotImplementedError(data.get("thong_bao", "Thư viện zca-js không hỗ trợ tra cứu sticker trong bản hiện tại"))
+        if code >= 400: raise RuntimeError(data.get("thong_bao", f"Sidecar trả lỗi {code}"))
+        return data.get("ket_qua", []) if isinstance(data, dict) else []
     def get_conversation(self, cid): return {"id": cid, "nguon": "ca_nhan_sidecar"}

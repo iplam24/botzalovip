@@ -302,14 +302,41 @@ const server = http.createServer(async (req, res) => {
       await api.addReaction("/-heart", dest);
       return send(res, 200, { thanh_cong: true });
     }
-    if (req.method === "POST" && url.pathname === "/dang-soan-tin") {
-      // Hiệu ứng "đang soạn tin": zca-js có sendTypingEvent thật.
+    if (req.method === "POST" && (url.pathname === "/dang-soan-tin" || url.pathname === "/dang-soan")) {
+      // Hiệu ứng "đang soạn tin": zca-js CÓ sendTypingEvent(threadId, type)
+      // thật — đã kiểm chứng dist/apis/sendTypingEvent.d.ts.
+      // /dang-soan là tên chuẩn mới (body {thread_id, loai_thread, bat});
+      // /dang-soan-tin giữ lại để tương thích bản backend cũ.
       if (!requireApi(res)) return;
       if (typeof api.sendTypingEvent !== "function") return send(res, 501, { thong_bao: "Thư viện zca-js hiện tại không hỗ trợ hiệu ứng đang soạn tin (không có sendTypingEvent)" });
       const b = await readBody(req);
       if (!b.thread_id) return send(res, 400, { thong_bao: "Thiếu thread_id" });
       await api.sendTypingEvent(String(b.thread_id), b.loai_thread ?? b.thread_type ?? 0);
       return send(res, 200, { thanh_cong: true });
+    }
+    if (req.method === "GET" && url.pathname === "/sticker-goi-y") {
+      // Gợi ý sticker THẬT qua zca-js: getStickers(keyword) -> [id...],
+      // getStickersDetail(ids) -> chi tiết {id, cateId, type, text, stickerUrl...}.
+      // Đã kiểm chứng cả hai hàm tồn tại trong dist/apis của thư viện.
+      if (!requireApi(res)) return;
+      if (typeof api.getStickers !== "function") return send(res, 501, { thong_bao: "Thư viện zca-js hiện tại không hỗ trợ tra cứu sticker (không có getStickers)" });
+      const q = url.searchParams.get("q") || "";
+      const ids = await api.getStickers(q);
+      const danhSachId = (Array.isArray(ids) ? ids : []).slice(0, 20);
+      let ket_qua = danhSachId.map((id) => ({ id: Number(id), cate_id: 0, type: 1, nhan: "", url_xem_truoc: "" }));
+      if (danhSachId.length && typeof api.getStickersDetail === "function") {
+        const chiTiet = await api.getStickersDetail(danhSachId);
+        if (Array.isArray(chiTiet)) {
+          ket_qua = chiTiet.map((d) => ({
+            id: Number(d?.id || 0),
+            cate_id: Number(d?.cateId || 0),
+            type: Number(d?.type || 1),
+            nhan: String(d?.text || ""),
+            url_xem_truoc: String(d?.stickerUrl || d?.stickerWebpUrl || d?.uri || ""),
+          })).filter((s) => s.id);
+        }
+      }
+      return send(res, 200, { ket_qua });
     }
     if (req.method === "GET" && url.pathname === "/ban-be") {
       // Danh sách bạn bè THẬT qua zca-js getAllFriends (mục 9.5) — không chế dữ liệu.
@@ -339,12 +366,22 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, publicState());
     }
     if (req.method === "POST" && url.pathname === "/gui-sticker") {
+      // Gửi sticker THẬT qua zca-js sendSticker({id, cateId, type}, threadId, type)
+      // — đã kiểm chứng dist/apis/sendSticker.d.ts.
+      // Body chuẩn: {thread_id, loai_thread, sticker:{id, cate_id, type}}
+      // (backend dùng cate_id snake_case, sidecar ánh xạ sang cateId của thư viện;
+      // vẫn nhận định dạng cũ {sticker_id, cate_id, sticker_type, thread_type}).
       if (!requireApi(res)) return;
       if (typeof api.sendSticker !== "function") return send(res, 501, { thong_bao: "Thư viện zca-js hiện tại không hỗ trợ gửi sticker (không có sendSticker)" });
       const b = await readBody(req);
-      const sticker = b.sticker || { id: Number(b.sticker_id || 0), cateId: Number(b.cate_id || 0), type: Number(b.sticker_type || 1) };
-      if (!sticker.id) return send(res, 400, { thong_bao: "Thiếu sticker_id: cần id, cateId và type của sticker theo định dạng zca-js" });
-      await api.sendSticker(sticker, String(b.thread_id || b.threadId || ""), b.thread_type ?? 0);
+      const tho = (b.sticker && typeof b.sticker === "object") ? b.sticker : null;
+      const sticker = tho
+        ? { id: Number(tho.id || 0), cateId: Number(tho.cateId ?? tho.cate_id ?? 0), type: Number(tho.type ?? 1) }
+        : { id: Number(b.sticker_id || 0), cateId: Number(b.cate_id || 0), type: Number(b.sticker_type || 1) };
+      const threadId = String(b.thread_id || b.threadId || "");
+      if (!threadId) return send(res, 400, { thong_bao: "Thiếu thread_id" });
+      if (!sticker.id) return send(res, 400, { thong_bao: "Thiếu sticker: cần {id, cate_id, type} của sticker" });
+      await api.sendSticker(sticker, threadId, b.loai_thread ?? b.thread_type ?? 0);
       return send(res, 200, { thanh_cong: true });
     }
     return send(res, 404, { thong_bao: "Không tìm thấy đường dẫn" });

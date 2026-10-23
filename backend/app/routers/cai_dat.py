@@ -152,7 +152,23 @@ DANG_KY_CAI_DAT = [
     _k("do_tre_giua_cac_tin_ms", "nhom_gui_tin", "Độ trễ giữa các tin (mili-giây)",
        "Nghỉ ngắn giữa hai tin liên tiếp để giống người thật gõ.", "so", 700, min=0, max=5000),
     _k("hieu_ung_dang_soan_tin", "nhom_gui_tin", "Hiệu ứng 'đang soạn tin'",
-       "Gửi sự kiện đang soạn tin (zca-js sendTypingEvent) trước mỗi phần tin.", "bool", False),
+       "Khóa cũ (Đợt 2) — đã được thay bằng 'Chế độ tốc độ trả lời' bên dưới (chế độ Tự nhiên/Chậm tự hiện đang soạn tin). Khóa này giữ để tương thích, không còn tác dụng riêng.", "bool", False),
+    _k("bot_gui_sticker", "nhom_gui_tin", "Bot gửi sticker sau khi trả lời",
+       "Khi bật: sau khi bot trả lời xong ở kênh Zalo cá nhân, bot có thể gửi thêm 1 sticker ngẫu nhiên trong danh sách bên dưới (theo xác suất). Mặc định tắt.", "bool", False),
+    _k("xac_suat_gui_sticker", "nhom_gui_tin", "Xác suất gửi sticker (%)",
+       "Tỉ lệ % mỗi câu trả lời được kèm sticker (chỉ áp dụng khi bật 'Bot gửi sticker'). 100 = luôn gửi, 0 = không bao giờ. Mặc định 20.", "so", 20, min=0, max=100),
+    _k("danh_sach_sticker", "nhom_gui_tin", "Danh sách sticker của bot (JSON)",
+       "Mảng JSON dạng [{\"id\": 12345, \"cate_id\": 678, \"type\": 1, \"nhan\": \"Vui\"}]. Lấy id/cate_id/type bằng ô 'Tìm sticker gợi ý' ở trang Tài khoản Zalo rồi bấm 'Thêm vào danh sách bot'. JSON sai định dạng sẽ bị từ chối khi lưu; khi chạy, JSON hỏng thì bot bỏ qua gửi sticker và ghi nhật ký.", "textarea", ""),
+    _k("che_do_toc_do_tra_loi", "nhom_gui_tin", "Chế độ tốc độ trả lời",
+       "Ngay: gửi ngay như người máy, không hiện đang soạn tin. Tự nhiên (mặc định): hiện 'đang soạn tin' rồi chờ theo độ dài câu trả lời như người thật gõ. Chậm: chờ lâu gấp đôi chế độ Tự nhiên.", "select", "tu_nhien",
+       lua_chon=["ngay", "tu_nhien", "cham"],
+       nhan_lua_chon={"ngay": "Gửi ngay", "tu_nhien": "Tự nhiên (hiện đang soạn tin)", "cham": "Chậm (hiện đang soạn tin, chờ lâu hơn)"}),
+    _k("toc_do_go_ms_moi_ky_tu", "nhom_gui_tin", "Tốc độ gõ (mili-giây mỗi ký tự)",
+       "Bot chờ bấy nhiêu mili-giây cho mỗi ký tự của câu trả lời ở chế độ Tự nhiên (chế độ Chậm nhân đôi). Mặc định 30.", "so", 30, min=0, max=500),
+    _k("do_tre_tra_loi_toi_thieu_ms", "nhom_gui_tin", "Độ trễ trả lời tối thiểu (mili-giây)",
+       "Câu trả lời ngắn đến đâu bot cũng chờ ít nhất bấy nhiêu trước khi gửi (trừ chế độ Gửi ngay). Mặc định 800.", "so", 800, min=0, max=60000),
+    _k("do_tre_tra_loi_toi_da_ms", "nhom_gui_tin", "Độ trễ trả lời tối đa (mili-giây)",
+       "Câu trả lời dài đến đâu bot cũng không chờ quá bấy nhiêu trước khi gửi. Mặc định 6000.", "so", 6000, min=0, max=120000),
     _k("bot_nhom_chi_khi_duoc_tag", "nhom_gui_tin", "Trong nhóm chỉ trả lời khi được tag đích danh",
        "Bật: bot chỉ trả lời khi mention chứa đúng UID tài khoản bot hoặc tên bot. Tag @all KHÔNG tính. Tắt: trả lời mọi tin nhóm.", "bool", True),
     _k("ten_bot_trong_nhom", "nhom_gui_tin", "Tên bot trong nhóm",
@@ -179,6 +195,8 @@ DANG_KY_CAI_DAT = [
        "Bật: truy xuất kho tri thức và bộ nhớ hợp nhất điểm ngữ nghĩa (cosine trên vector nhúng) với điểm từ khóa. Muốn có kết quả ngữ nghĩa phải có vector đã nhúng (Kho tri thức → nút Nhúng lại toàn bộ) và nguồn embedding sẵn sàng. Tắt hoặc chưa có vector: hệ thống tự dùng tìm từ khóa như cũ.", "bool", True),
     _k("so_ket_qua_ngu_nghia", "he_thong", "Số kết quả ngữ nghĩa tối đa",
        "Số đoạn tri thức/ký ức lấy theo độ tương đồng ngữ nghĩa trong mỗi lần truy hồi (hợp nhất với kết quả từ khóa).", "so", 4, min=1, max=20),
+    _k("so_ngay_luu_anh_khach", "he_thong", "Số ngày lưu ảnh khách gửi",
+       "Ảnh khách gửi được tải về máy chủ để bot xem; hệ thống tự xóa ảnh cũ hơn số ngày này (chạy nền mỗi 24 giờ + nút 'Dọn dẹp ngay' ở trang Tài khoản Zalo) để không nặng máy chủ. Ảnh đã xóa thì bong bóng chat hiện 'Ảnh đã hết hạn lưu trữ'. Mặc định 7 ngày.", "so", 7, min=1, max=90),
 ]
 
 MAC_DINH = {d["khoa"]: d["mac_dinh"] for d in DANG_KY_CAI_DAT}
@@ -239,6 +257,19 @@ def _kiem_tra_gia_tri(dinh_nghia: dict, gia_tri):
         s = str(gia_tri or "").strip()
         if s and not (s.startswith("#") and len(s) in (4, 7)):
             raise HTTPException(400, f"Cài đặt {khoa} phải là mã màu dạng #RRGGBB")
+        return s
+    if khoa == "danh_sach_sticker":
+        # Danh sách sticker phải là JSON mảng [{id, cate_id, type, ...}] —
+        # kiểm tra ngay khi lưu để lỗi lộ sớm thay vì bot lặng lẽ không gửi.
+        s = str(gia_tri or "").strip()
+        if s:
+            try:
+                ds = json.loads(s)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Danh sách sticker phải là JSON hợp lệ dạng [{\"id\":..., \"cate_id\":..., \"type\":...}]")
+            if (not isinstance(ds, list)
+                    or any(not isinstance(x, dict) or not x.get("id") for x in ds)):
+                raise HTTPException(400, "Danh sách sticker phải là mảng các đối tượng có trường 'id'")
         return s
     return "" if gia_tri is None else str(gia_tri)
 

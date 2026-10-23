@@ -12,6 +12,7 @@ Quy tắc an toàn:
 import base64
 import hashlib
 import os
+import time
 
 _THU_MUC_BACKEND = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 THU_MUC_UPLOADS = os.path.join(_THU_MUC_BACKEND, "uploads")
@@ -81,6 +82,75 @@ def tai_anh_tu_url(url: str):
         return {"ten_file": ten_file, "duong_dan": duong_dan, "mime": mime, "kich_thuoc": len(du_lieu)}
     except Exception:
         return None
+
+
+def _cac_file_anh() -> list:
+    """Mọi file trong thư mục uploads (đều là ảnh khách đã tải về — tên file
+    là hash nội dung). Thư mục chưa có -> coi như rỗng, tự tạo."""
+    try:
+        _dam_bao_thu_muc()
+        return [os.path.join(THU_MUC_UPLOADS, ten) for ten in os.listdir(THU_MUC_UPLOADS)
+                if os.path.isfile(os.path.join(THU_MUC_UPLOADS, ten))]
+    except Exception:
+        return []
+
+
+def thong_ke_anh() -> dict:
+    """Thống kê lưu trữ ảnh khách: số file + tổng dung lượng."""
+    files = _cac_file_anh()
+    tong = 0
+    for duong_dan in files:
+        try:
+            tong += os.path.getsize(duong_dan)
+        except OSError:
+            pass
+    return {"so_anh": len(files), "tong_bytes": tong,
+            "tong_mb": round(tong / 1024 / 1024, 3)}
+
+
+def don_dep_anh_cu(db, so_ngay) -> dict:
+    """Xóa file ảnh có mtime cũ hơn `so_ngay` ngày (chính sách lưu ảnh của LAM:
+    ảnh KHÔNG lưu lâu kẻo nặng server — bot chỉ cần ảnh ở thời điểm trả lời).
+
+    Nguồn thời gian nhất quán: mtime của file vật lý (đúng bản chất lưu trữ).
+    CHỈ xóa file, KHÔNG sửa DB: tin nhắn cũ vẫn trỏ /api/tep/<file>, API trả
+    404 và giao diện hiện ô "Ảnh đã hết hạn lưu trữ" thay cho ảnh vỡ.
+    Ghi 1 SystemLog tổng kết (số file + MB giải phóng). Lỗi từng file bị bỏ
+    qua, không bao giờ làm sập tiến trình gọi (kể cả luồng nền).
+    """
+    try:
+        so_ngay = int(so_ngay)
+    except (TypeError, ValueError):
+        so_ngay = 7
+    so_ngay = max(1, so_ngay)
+    nguong = time.time() - so_ngay * 86400
+    da_xoa = 0
+    giai_phong = 0
+    for duong_dan in _cac_file_anh():
+        try:
+            if os.path.getmtime(duong_dan) < nguong:
+                kich_thuoc = os.path.getsize(duong_dan)
+                os.remove(duong_dan)
+                da_xoa += 1
+                giai_phong += kich_thuoc
+        except OSError:
+            continue
+    giai_phong_mb = round(giai_phong / 1024 / 1024, 3)
+    if db is not None:
+        try:
+            from ..models import SystemLog
+            db.add(SystemLog(
+                level="info", module="don_dep_anh",
+                message=f"Dọn ảnh khách quá hạn {so_ngay} ngày: đã xóa {da_xoa} file, "
+                        f"giải phóng {giai_phong_mb} MB"))
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+    return {"da_xoa": da_xoa, "giai_phong_bytes": giai_phong,
+            "giai_phong_mb": giai_phong_mb}
 
 
 def doc_anh_data_uri(duong_dan: str) -> str:

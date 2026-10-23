@@ -53,6 +53,15 @@ def ca_nhan_unlink(u: User = Depends(get_current_user)):
     """Ngắt LIÊN KẾT hẳn: sidecar dừng phiên + xóa dữ liệu phiên đã lưu
     (phải quét QR lại). Chỉ tồn tại vì sidecar hỗ trợ thật thao tác này."""
     return ZaloPersonalConnector().ngat_lien_ket()
+@router.get("/ca-nhan/sticker-goi-y")
+def ca_nhan_sticker_goi_y(q: str = "", u: User = Depends(get_current_user)):
+    """Gợi ý sticker thật từ Zalo (sidecar -> zca-js getStickers) để admin
+    lấy {id, cate_id, type} đưa vào cài đặt 'Danh sách sticker của bot'."""
+    try:
+        return {"ket_qua": ZaloPersonalConnector().goi_y_sticker(q)}
+    except (RuntimeError, NotImplementedError) as e:
+        raise HTTPException(502, str(e))
+
 @router.post("/ca-nhan/gui-tin-nhan")
 async def ca_nhan_send(req: Request, u: User = Depends(get_current_user)):
     body = await req.json()
