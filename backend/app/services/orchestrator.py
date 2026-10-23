@@ -17,10 +17,23 @@
 - Chế độ TRÒ CHUYỆN TỰ DO (che_do_tro_chuyen_tu_do): bỏ qua tri thức/dịch vụ/
   bộ nhớ tư vấn, tắt hỏi SĐT + tắt thông báo lead; luật nhóm, từ khóa cấm,
   chuyển nhân viên, thả tim, chia tin, định dạng Zalo vẫn áp dụng như thường.
+
+Đợt bổ sung 23/10/2026 (yêu cầu của LAM — nhắn như người thật):
+- A: chia tin TỰ NHIÊN theo ngưỡng mềm do_dai_muc_tieu_moi_tin (mặc định
+  120 ký tự) — reply ngắn vẫn tách thành nhiều bong bóng theo câu.
+- B: GOM tin khách gửi liên tiếp ở chat 1-1 (gom_tin_lien_tiep +
+  thoi_gian_gom_tin_giay): tiep_nhan_tin_den() đệm payload theo khách,
+  các tin trừ tin cuối chạy process_inbound với bo_qua_tra_loi=True (vẫn
+  lưu + trích xuất), tin cuối trả lời 1 lượt với đủ ngữ cảnh.
+- C: bot TỰ NHẮN THÊM (bot_tu_nhan_them): sau khi trả lời 1-1 thành công,
+  lên lịch 1 tin phụ sau khoảng ngẫu nhiên (min–max giây); khi tới giờ,
+  thuc_hien_tin_nhan_them() kiểm tra lại các điều kiện hủy (tiếp quản,
+  khách đã nhắn tiếp, nhân viên đã nhắn, đã có tin thêm) rồi mới gửi.
 """
 import json
 import os
 import random
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -144,7 +157,8 @@ def _gan_admin_tu_ban_be(db: Session, cust: Customer, conv: Conversation, custom
 def process_inbound(db: Session, external_id: str, customer_external_id: str, customer_name: str, content: str,
                     zalo_account_id=None, channel: str = "mo_phong",
                     mentions=None, la_nhom: bool = False, bot_uid: str = "",
-                    nguoi_gui_id: str = "", cli_msg_id: str = "", dinh_kem=None):
+                    nguoi_gui_id: str = "", cli_msg_id: str = "", dinh_kem=None,
+                    bo_qua_tra_loi: bool = False):
     trace = str(uuid.uuid4())[:8]
     cai_dat = _doc_cai_dat(db)
     # Chế độ trò chuyện tự do: bot nghỉ bán hàng — không hỏi SĐT, không báo
@@ -231,6 +245,13 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
                 _thong_bao(db, "du_thong_tin", "Đã thu thập đủ thông tin khách", f"Khách {ten_khach} đã có đủ thông tin cơ bản theo các trường bắt buộc đã cấu hình.", cust, conv, "thong_tin", channel)
         except Exception as e:
             db.add(SystemLog(level="warning", module="thu_thap", message=f"Lỗi trích xuất thông tin khách: {e}", trace_id=trace)); db.commit()
+    # PHẦN B (gom tin): tin này thuộc một batch gom và KHÔNG phải tin cuối —
+    # đã lưu tin + trích xuất thông tin như thường, nhưng phần sinh/gửi câu
+    # trả lời để tin CUỐI của batch đảm nhiệm (khi đó lịch sử đã gồm tin này
+    # nên AI trả lời 1 lượt với đủ ngữ cảnh).
+    if bo_qua_tra_loi:
+        return {"trung": False, "trace_id": trace, "tra_loi": None, "ly_do": "da_gom_cho_tin_sau",
+                "conversation_id": conv.id, "customer_id": cust.id}
     # Automation check: bot tạm dừng hoặc nhân viên tiếp quản -> không trả lời tự động
     if not conv.bot_enabled or conv.human_takeover:
         return {"trung": False, "trace_id": trace, "tra_loi": None, "ly_do": "bot_da_tam_dung_hoac_nhan_vien_tiep_quan", "conversation_id": conv.id, "customer_id": cust.id}
@@ -382,6 +403,311 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
     return ket_qua_gui
 
 
+# =====================================================================
+# PHẦN B — GOM TIN KHÁCH GỬI LIÊN TIẾP (chỉ chat 1-1, kênh cá nhân)
+#
+# Khách hay nhắn 2-3 tin dồn dập ("shop ơi" / "giá sao" / "có ship không").
+# Trả lời từng tin thì bot rep cụt + thiếu ngữ cảnh. tiep_nhan_tin_den()
+# đệm payload theo khóa khách trong cửa sổ gom (thoi_gian_gom_tin_giay):
+# - Payload ĐẦU TIÊN của batch giữ vai "chủ batch": chờ hết cửa sổ (tin
+#   mới tới trong lúc chờ sẽ gia hạn hạn chót) rồi gọi xu_ly_hang_gom() và
+#   trả kết quả thật về cho chính request đó — webhook không phải trả
+#   "đang gom" cho sidecar và thứ tự xử lý không bị đảo.
+# - Các payload đến sau trong lúc chủ batch đang chờ chỉ nối vào hàng và
+#   trả về ly_do="dang_gom_tin" ngay.
+# - thoi_gian_gom_tin_giay = 0: chỉ đệm, không tự xả (kiểm thử gọi
+#   xu_ly_hang_gom() trực tiếp; vận hành thật nên để >= 1 giây).
+# GIỚI HẠN TRUNG THỰC: payload trong cửa sổ gom chỉ nằm trong BỘ NHỚ —
+# máy chủ khởi động lại giữa cửa sổ gom (tối đa bằng số giây cấu hình)
+# thì các tin chưa xả sẽ mất khỏi pipeline (tin gốc vẫn còn trên Zalo).
+# =====================================================================
+_HANG_GOM: dict = {}
+_HANG_GOM_LOCK = threading.Lock()
+
+
+def xu_ly_hang_gom(khoa):
+    """Xả một hàng gom: chạy process_inbound lần lượt cho từng payload —
+    các payload trừ payload CUỐI mang bo_qua_tra_loi=True (chỉ lưu +
+    trích xuất), payload cuối chạy pipeline đầy đủ và trả lời 1 lượt.
+    Mở session DB mới để dùng được từ mọi luồng. Lỗi chỉ ghi log
+    (module "gom_tin"), không ném ra ngoài."""
+    with _HANG_GOM_LOCK:
+        muc = _HANG_GOM.pop(str(khoa), None)
+    if not muc or not muc.get("payloads"):
+        return None
+    payloads = muc["payloads"]
+    from ..database import SessionLocal
+    db = SessionLocal()
+    try:
+        ket_qua = None
+        for i, pl in enumerate(payloads):
+            pl_day_du = dict(pl)
+            pl_day_du["bo_qua_tra_loi"] = i < len(payloads) - 1
+            ket_qua = process_inbound(db, **pl_day_du)
+        try:
+            db.add(SystemLog(level="info", module="gom_tin",
+                             message=f"da_xa_hang_gom khoa={khoa} so_tin={len(payloads)}"))
+            db.commit()
+        except Exception:
+            db.rollback()
+        return ket_qua
+    except Exception as e:
+        try:
+            db.rollback()
+            db.add(SystemLog(level="error", module="gom_tin",
+                             message=f"Lỗi xử lý hàng gom khoa={khoa}: {e}"))
+            db.commit()
+        except Exception:
+            pass
+        return None
+    finally:
+        db.close()
+
+
+def tiep_nhan_tin_den(db: Session, external_id: str, customer_external_id: str, customer_name: str,
+                      content: str, zalo_account_id=None, channel: str = "mo_phong",
+                      mentions=None, la_nhom: bool = False, bot_uid: str = "",
+                      nguoi_gui_id: str = "", cli_msg_id: str = "", dinh_kem=None):
+    """Điểm vào DUY NHẤT cho tin đến (router zalo.py gọi hàm này).
+
+    - Kênh mô phỏng / tin NHÓM / gom đang tắt -> process_inbound thẳng
+      như trước (nhóm giữ nguyên xử lý từng tin theo luật tag).
+    - Chat 1-1 kênh cá nhân + gom bật -> đệm payload theo khách, xem
+      khối PHẦN B ở trên về cơ chế chủ batch chờ hết cửa sổ gom.
+    """
+    payload = {"external_id": external_id, "customer_external_id": customer_external_id,
+               "customer_name": customer_name, "content": content,
+               "zalo_account_id": zalo_account_id, "channel": channel,
+               "mentions": mentions, "la_nhom": la_nhom, "bot_uid": bot_uid,
+               "nguoi_gui_id": nguoi_gui_id, "cli_msg_id": cli_msg_id, "dinh_kem": dinh_kem}
+    if channel != "ca_nhan" or la_nhom:
+        return process_inbound(db, **payload)
+    cai_dat = _doc_cai_dat(db)
+    if not cai_dat.get("gom_tin_lien_tiep", True):
+        return process_inbound(db, **payload)
+    tho_giay = cai_dat.get("thoi_gian_gom_tin_giay")
+    try:
+        giay = float(5 if tho_giay is None else tho_giay)  # 0 là giá trị HỢP LỆ (không tự xả)
+    except (TypeError, ValueError):
+        giay = 5.0
+    giay = min(30.0, max(0.0, giay))
+    khoa = str(customer_external_id)
+    dang_gom = {"trung": False, "tra_loi": None, "ly_do": "dang_gom_tin", "dang_gom": True}
+    if giay <= 0:
+        with _HANG_GOM_LOCK:
+            muc = _HANG_GOM.setdefault(khoa, {"payloads": [], "han": 0.0, "dang_cho": False})
+            muc["payloads"].append(payload)
+        return dang_gom
+    la_chu_batch = False
+    with _HANG_GOM_LOCK:
+        muc = _HANG_GOM.get(khoa)
+        if muc is not None and muc.get("dang_cho"):
+            muc["payloads"].append(payload)
+            muc["han"] = time.monotonic() + giay
+        else:
+            muc = {"payloads": [payload], "han": time.monotonic() + giay, "dang_cho": True}
+            _HANG_GOM[khoa] = muc
+            la_chu_batch = True
+    if not la_chu_batch:
+        return dang_gom
+    # Chủ batch: chờ hết cửa sổ gom (hạn chót được gia hạn mỗi khi có tin
+    # mới nối vào) rồi xả hàng và trả kết quả của tin cuối cho request này.
+    try:
+        while True:
+            with _HANG_GOM_LOCK:
+                con_lai = muc["han"] - time.monotonic()
+            if con_lai <= 0:
+                break
+            time.sleep(min(con_lai, 0.2))
+    except Exception:
+        pass
+    ket_qua = xu_ly_hang_gom(khoa)
+    return ket_qua or {"trung": False, "tra_loi": None, "ly_do": "loi_gom_tin", "dang_gom": True}
+
+
+# =====================================================================
+# PHẦN C — BOT TỰ NHẮN THÊM (follow-up chủ động, chỉ chat 1-1)
+#
+# Sau khi _send_reply gửi THÀNH CÔNG ở kênh cá nhân (không phải nhóm,
+# không phải chính tin nhắn thêm), lên lịch 1 Timer ngẫu nhiên trong
+# khoảng [tin_nhan_them_sau_giay_min, tin_nhan_them_sau_giay_max]. Khi
+# Timer cháy, thuc_hien_tin_nhan_them() mở session mới và kiểm tra lại
+# toàn bộ điều kiện hủy trước khi sinh + gửi — tối đa 1 tin thêm cho
+# mỗi lượt khách nhắn, không bao giờ thành chuỗi vô hạn.
+# =====================================================================
+_CHI_DAN_NHAN_THEM = (
+    "Bạn vừa trả lời xong. Hãy nhắn thêm ĐÚNG MỘT tin thật ngắn (1 câu) như người thật vừa nhớ ra: "
+    "bổ sung ý hữu ích, gợi ý liên quan hoặc hỏi thêm nhu cầu. "
+    "Nếu thật sự không có gì đáng nhắn thêm, trả về đúng chuỗi [BO_QUA] và không gì khác."
+)
+
+
+def _len_lich_tin_nhan_them(db, conv, cai_dat, tin_bot_id, trace=""):
+    """Lên lịch tin nhắn thêm sau lượt bot vừa trả lời (kênh cá nhân 1-1).
+
+    Tách thành hàm riêng để kiểm thử thay bằng bản ghi lại (không chờ thật).
+    Mọi lỗi khi lên lịch đều bị nuốt — không được làm hỏng câu trả lời chính.
+    """
+    try:
+        if not cai_dat.get("bot_tu_nhan_them"):
+            return
+        if not tin_bot_id:
+            return
+
+        def _so(khoa, mac_dinh):
+            tho = cai_dat.get(khoa)
+            try:
+                return float(mac_dinh if tho is None else tho)  # 0 hợp lệ, không được thay bằng mặc định
+            except (TypeError, ValueError):
+                return float(mac_dinh)
+
+        tre_min = _so("tin_nhan_them_sau_giay_min", 30)
+        tre_max = _so("tin_nhan_them_sau_giay_max", 90)
+        if tre_max < tre_min:
+            tre_min, tre_max = tre_max, tre_min
+        tre = random.uniform(tre_min, tre_max)
+        timer = threading.Timer(tre, _hen_gio_nhan_them, args=(conv.id, tin_bot_id))
+        timer.daemon = True
+        timer.start()
+    except Exception:
+        pass
+
+
+def _hen_gio_nhan_them(conversation_id, tin_bot_id):
+    """Callback của Timer — nuốt mọi lỗi để luồng nền không bao giờ sập."""
+    try:
+        thuc_hien_tin_nhan_them(conversation_id, tin_bot_id)
+    except Exception:
+        pass
+
+
+def _da_gui_nhan_them_cho(db, conversation_id, id_tin_khach) -> bool:
+    """Đã có 1 tin nhắn thêm được gửi kể từ tin khách này chưa (đánh dấu
+    bằng SystemLog module tin_nhan_them — cùng quy ước với da_hoi_sdt)."""
+    return db.query(SystemLog).filter(
+        SystemLog.module == "tin_nhan_them",
+        SystemLog.message.like(f"da_gui_nhan_them conv={conversation_id} sau_khach={id_tin_khach} %"),
+    ).first() is not None
+
+
+def thuc_hien_tin_nhan_them(conversation_id, message_id_cua_luot_bot):
+    """Thực hiện tin nhắn thêm (tách riêng để kiểm thử gọi đồng bộ).
+
+    Mở session mới, kiểm tra các điều kiện HỦY (bất kỳ điều nào đúng thì
+    hủy im lặng, chỉ ghi SystemLog module "tin_nhan_them"):
+    (1) tính năng đã tắt / hội thoại bị nhân viên tiếp quản hoặc bot bị
+        tạm dừng (đúng cơ chế conv.bot_enabled + conv.human_takeover mà
+        process_inbound dùng để quyết định bot có được rep hay không);
+    (2) khách đã nhắn tin MỚI hơn lượt bot vừa rep;
+    (3) nhân viên đã nhắn sau lượt bot;
+    (4) đã có 1 tin nhắn thêm kể từ tin khách cuối (tối đa 1/lượt).
+    Nội dung do AI sinh từ lịch sử hội thoại + chỉ dẫn riêng; AI trả
+    [BO_QUA]/rỗng/lỗi thì không gửi. Gửi qua _send_reply với
+    la_tin_nhan_them=True (không tự lên lịch tiếp, không kèm sticker).
+    """
+    from ..database import SessionLocal
+    db = SessionLocal()
+    try:
+        trace = str(uuid.uuid4())[:8]
+        conv = db.get(Conversation, conversation_id)
+        if not conv:
+            return {"gui": False, "ly_do": "khong_tim_thay_hoi_thoai"}
+        cust = db.get(Customer, conv.customer_id)
+        if not cust:
+            return {"gui": False, "ly_do": "khong_tim_thay_khach"}
+        cai_dat = _doc_cai_dat(db)
+
+        def _huy(ly_do):
+            try:
+                db.add(SystemLog(level="info", module="tin_nhan_them",
+                                 message=f"huy_nhan_them conv={conv.id} sau_tin_bot={message_id_cua_luot_bot}: {ly_do}",
+                                 trace_id=trace))
+                db.commit()
+            except Exception:
+                db.rollback()
+            return {"gui": False, "ly_do": ly_do}
+
+        if not cai_dat.get("bot_tu_nhan_them"):
+            return _huy("tinh_nang_da_tat")
+        # (1) Tiếp quản / tạm dừng bot
+        if not conv.bot_enabled or conv.human_takeover:
+            return _huy("nhan_vien_tiep_quan_hoac_bot_tam_dung")
+        tin_bot = db.get(Message, message_id_cua_luot_bot)
+        if not tin_bot or tin_bot.conversation_id != conv.id:
+            return _huy("khong_tim_thay_tin_bot")
+        # (2) Khách đã nhắn tin mới hơn lượt bot
+        if db.query(Message).filter(Message.conversation_id == conv.id,
+                                    Message.sender_type == "khach",
+                                    Message.id > tin_bot.id).first():
+            return _huy("khach_da_nhan_tin_moi")
+        # (3) Nhân viên đã nhắn sau lượt bot
+        if db.query(Message).filter(Message.conversation_id == conv.id,
+                                    Message.sender_type == "nhan_vien",
+                                    Message.id > tin_bot.id).first():
+            return _huy("nhan_vien_da_nhan_tin")
+        # (4) Đã có tin nhắn thêm kể từ tin khách cuối
+        tin_khach_cuoi = (db.query(Message)
+                          .filter(Message.conversation_id == conv.id, Message.sender_type == "khach")
+                          .order_by(Message.id.desc()).first())
+        id_khach_cuoi = tin_khach_cuoi.id if tin_khach_cuoi else 0
+        if id_khach_cuoi and _da_gui_nhan_them_cho(db, conv.id, id_khach_cuoi):
+            return _huy("da_co_tin_nhan_them")
+        # Sinh nội dung: lịch sử gần nhất + chỉ dẫn nhắn thêm riêng
+        try:
+            so_tin_ls = int(cai_dat.get("so_tin_nhan_ngu_canh") or 10)
+        except (TypeError, ValueError):
+            so_tin_ls = 10
+        dong_ls = (db.query(Message)
+                   .filter(Message.conversation_id == conv.id)
+                   .order_by(Message.id.desc()).limit(max(1, so_tin_ls)).all())
+        lich_su = [{"role": "user" if m.sender_type == "khach" else "assistant", "content": m.content}
+                   for m in reversed(dong_ls) if m.content]
+        chi_dan = _CHI_DAN_NHAN_THEM
+        if cai_dat.get("che_do_tro_chuyen_tu_do"):
+            chi_dan += (" Đang ở chế độ trò chuyện tự do: nhắn như bạn bè thân thiết, "
+                        "tự nhiên, vui vẻ, đúng chất chat giải trí.")
+        provider = ai_gateway.get_default_provider(db)
+        try:
+            noi_dung, model_used = ai_gateway.generate_reply(
+                db, provider, chi_dan, [], [], lich_su=lich_su, cai_dat=cai_dat,
+                ho_so_khach=(cust.memory_summary or ""))
+        except Exception as e:
+            return _huy(f"loi_ai: {e}")
+        noi_dung = (noi_dung or "").strip()
+        if not noi_dung or noi_dung == "[BO_QUA]":
+            return _huy("ai_bo_qua")
+        ket_qua = _send_reply(db, conv, cust, noi_dung, trace, model_used=model_used,
+                              channel="ca_nhan", cai_dat=cai_dat, tin_khach=None,
+                              la_tin_nhan_them=True)
+        if ket_qua.get("ly_do") == "cho_duyet_truoc_khi_gui":
+            # Chế độ duyệt trước khi gửi: _send_reply chỉ tạo NHÁP như lượt
+            # chính — không tính là đã gửi, không đánh dấu chống trùng.
+            try:
+                db.add(SystemLog(level="info", module="tin_nhan_them",
+                                 message=f"nhan_them_thanh_nhap_cho_duyet conv={conv.id}",
+                                 trace_id=trace))
+                db.commit()
+            except Exception:
+                db.rollback()
+            return {"gui": False, "ly_do": "cho_duyet_truoc_khi_gui"}
+        if not ket_qua.get("tra_loi"):
+            try:
+                db.add(SystemLog(level="warning", module="tin_nhan_them",
+                                 message=f"gui_nhan_them_that_bai conv={conv.id}: {ket_qua.get('ly_do')}",
+                                 trace_id=trace))
+                db.commit()
+            except Exception:
+                db.rollback()
+            return {"gui": False, "ly_do": ket_qua.get("ly_do") or "gui_that_bai"}
+        db.add(SystemLog(level="info", module="tin_nhan_them",
+                         message=f"da_gui_nhan_them conv={conv.id} sau_khach={id_khach_cuoi} msg={ket_qua.get('tin_bot_id')}",
+                         trace_id=trace))
+        db.commit()
+        return {"gui": True, "noi_dung": noi_dung, "conversation_id": conv.id}
+    finally:
+        db.close()
+
+
 def _tin_khach(customer_external_id, external_id, cli_msg_id, la_nhom):
     return {"thread_id": str(customer_external_id), "external_id": str(external_id or ""),
             "cli_msg_id": str(cli_msg_id or ""), "loai_thread": 1 if la_nhom else 0}
@@ -493,7 +819,7 @@ def _gui_sticker_neu_may(db, conv, cust, cai_dat, tin_khach, trace):
 
 
 def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=None, intent="", channel="mo_phong",
-                cai_dat=None, tin_khach=None):
+                cai_dat=None, tin_khach=None, la_tin_nhan_them: bool = False):
     cd = cai_dat if cai_dat is not None else _doc_cai_dat(db)
     # Mục 6: chuẩn hoá định dạng TRƯỚC khi gửi và trước khi lưu hiển thị.
     reply = dinh_dang_tin_zalo(reply or "")
@@ -515,19 +841,26 @@ def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=N
         except Exception as e:
             db.add(SystemLog(level="warning", module="tha_tim", message=f"Không thả tim được cho tin {tin_khach.get('external_id')}: {e}", trace_id=trace)); db.commit()
     # Mục 5: chia nhỏ tin — áp dụng ở kênh cá nhân (bật/tắt + độ dài theo Cài đặt).
+    # PHẦN A: truyền thêm ngưỡng MỀM do_dai_muc_tieu_moi_tin để chia TỰ NHIÊN
+    # thành nhiều bong bóng ngắn theo câu, kể cả khi reply dưới ngưỡng cứng.
     cac_phan = [reply]
     if channel == "ca_nhan" and cd.get("gui_tin_chia_nho", True):
         try:
             do_dai = int(cd.get("do_dai_toi_da_moi_tin") or 350)
         except (TypeError, ValueError):
             do_dai = 350
-        cac_phan = chia_tin_nhan(reply, do_dai) or [reply]
+        try:
+            muc_tieu = int(cd.get("do_dai_muc_tieu_moi_tin") or 0)
+        except (TypeError, ValueError):
+            muc_tieu = 0
+        cac_phan = chia_tin_nhan(reply, do_dai, muc_tieu) or [reply]
     try:
         do_tre_ms = int(os.getenv("GUI_TIN_DELAY_MS") or cd.get("do_tre_giua_cac_tin_ms") or 700)
     except (TypeError, ValueError):
         do_tre_ms = 700
     loi_cuoi = None
     so_phan_ok = 0
+    tin_bot_cuoi = None  # Message bot gửi thành công gần nhất của lượt này (cho PHẦN C)
     # Tốc độ trả lời (theo Cài đặt): chế độ "ngay" = gửi ngay không typing;
     # "tu_nhien"/"cham" = hiện "đang soạn tin" (zca-js sendTypingEvent) rồi
     # chờ theo độ dài phần tin (tinh_do_tre) trước khi gửi — như người thật gõ.
@@ -550,7 +883,9 @@ def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=N
                 ZaloPersonalConnector().send_text(str(cust.external_id), phan)
             else:
                 mock_connector.send_text(str(conv.id), phan)
-            db.add(Message(conversation_id=conv.id, external_id=None, sender_type="bot", content=phan, status="da_gui"))
+            _tin_vua_gui = Message(conversation_id=conv.id, external_id=None, sender_type="bot", content=phan, status="da_gui")
+            db.add(_tin_vua_gui)
+            tin_bot_cuoi = _tin_vua_gui
             so_phan_ok += 1
         except Exception as e:
             loi_cuoi = e
@@ -561,13 +896,27 @@ def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=N
         db.add(SystemLog(level="error", module="zalo", message=f"Lỗi gửi tin qua kênh {channel}: {loi_cuoi}", trace_id=trace)); db.commit()
         _thong_bao(db, "loi_he_thong", "Lỗi gửi tin qua connector", f"Gửi tin cho khách {cust.display_name or cust.external_id} qua kênh {channel} thất bại: {loi_cuoi}", cust, conv, "khan_cap", channel)
         return {**ket_qua_chung, "tra_loi": None, "ly_do": f"loi_connector: {loi_cuoi}"}
+    id_tin_bot_cuoi = None
+    if tin_bot_cuoi is not None:
+        try:
+            id_tin_bot_cuoi = tin_bot_cuoi.id
+        except Exception:
+            id_tin_bot_cuoi = None
     # Bot gửi sticker: chỉ kênh cá nhân, chỉ khi câu trả lời đã gửi thành công
     # (áp dụng cho cả chế độ tư vấn lẫn trò chuyện tự do vì cả hai đều qua đây).
-    # Không cần typing cho sticker.
-    if channel == "ca_nhan":
+    # Không cần typing cho sticker. Tin nhắn THÊM (PHẦN C) không kèm sticker
+    # để tránh 2 sticker liền nhau.
+    if channel == "ca_nhan" and not la_tin_nhan_them:
         _gui_sticker_neu_may(db, conv, cust, cd, tin_khach, trace)
+    # PHẦN C: lên lịch tin nhắn thêm — chỉ chat 1-1 (tin_khach loai_thread=1
+    # là NHÓM thì bỏ qua), chỉ khi lượt này không phải chính tin nhắn thêm
+    # (chống đệ quy), và chỉ sau khi đã gửi thành công ít nhất 1 phần tin.
+    # Chế độ duyệt trước khi gửi không tới được đây (đã return ở trên).
+    if channel == "ca_nhan" and not la_tin_nhan_them and id_tin_bot_cuoi:
+        if not (tin_khach and tin_khach.get("loai_thread")):
+            _len_lich_tin_nhan_them(db, conv, cd, id_tin_bot_cuoi, trace)
     # Cập nhật bộ nhớ: ghi sự kiện tương tác
     if cd.get("module_bo_nho_ai", True) is not False:
         memory_service.remember(db, cust.id, f"Khách đã hỏi và được trả lời: {reply[:120]}", memory_type="su_kien", source="orchestrator", confidence=0.7)
     db.add(SystemLog(level="info", module="orchestrator", message=f"Đã trả lời hội thoại {conv.id} model={model_used} so_phan_tin={len(cac_phan)}", trace_id=trace)); db.commit()
-    return {**ket_qua_chung, "tra_loi": reply, "so_phan_tin": len(cac_phan)}
+    return {**ket_qua_chung, "tra_loi": reply, "so_phan_tin": len(cac_phan), "tin_bot_id": id_tin_bot_cuoi}

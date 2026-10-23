@@ -116,16 +116,68 @@ def _tach_cau(doan: str) -> list[str]:
     return [c for c in _KET_CAU.split(doan.strip()) if c and c.strip()]
 
 
-def chia_tin_nhan(text: str, do_dai_toi_da: int = 350) -> list[str]:
+def _gop_don_vi(don_vi: list[tuple[str, bool]], gioi_han: int) -> list[str]:
+    """Gộp tham lam các đơn vị (nội dung, có_xuống_dòng_trước) thành các phần
+    tin không vượt gioi_han — một đơn vị đơn lẻ dài hơn gioi_han vẫn đứng một
+    mình thành một phần (không bị cắt ở bước gộp này)."""
+    phan_hoan_chinh: list[str] = []
+    hien_tai = ""
+    for noi_dung, xuong_dong in don_vi:
+        if not hien_tai:
+            hien_tai = noi_dung
+            continue
+        dau_noi = "\n" if xuong_dong else " "
+        if len(hien_tai) + len(dau_noi) + len(noi_dung) <= gioi_han:
+            hien_tai = hien_tai + dau_noi + noi_dung
+        else:
+            phan_hoan_chinh.append(hien_tai)
+            hien_tai = noi_dung
+    if hien_tai:
+        phan_hoan_chinh.append(hien_tai)
+    return [p for p in (x.strip() for x in phan_hoan_chinh) if p]
+
+
+def _don_vi_tu_nhien(text: str, toi_da: int) -> list[tuple[str, bool]]:
+    """Đơn vị cho chế độ chia TỰ NHIÊN: luôn tách tới cấp câu (kể cả đoạn
+    ngắn), câu nào dài hơn ngưỡng cứng mới cắt cứng theo từ."""
+    don_vi: list[tuple[str, bool]] = []
+    for doan in re.split(r"\n+", text):
+        doan = doan.strip()
+        if not doan:
+            continue
+        for vi_tri, cau in enumerate(_tach_cau(doan)):
+            if len(cau) <= toi_da:
+                don_vi.append((cau, vi_tri == 0))
+            else:
+                for j, manh in enumerate(_cat_cung(cau, toi_da)):
+                    don_vi.append((manh, vi_tri == 0 and j == 0))
+    return don_vi
+
+
+def chia_tin_nhan(text: str, do_dai_toi_da: int = 350, do_dai_muc_tieu: int = 0) -> list[str]:
     """Chia câu trả lời dài thành nhiều tin: ưu tiên đoạn -> câu -> cắt cứng.
 
     Giữ nguyên thứ tự; phần tử rỗng bị loại; không phần nào dài quá giới hạn
     (trừ khi một 'từ' duy nhất dài hơn giới hạn — lúc đó cắt cứng theo ký tự).
+
+    do_dai_muc_tieu > 0 (chia TỰ NHIÊN): tách theo đoạn/câu rồi gộp tham lam
+    tới ngưỡng MỀM này để mỗi bong bóng ngắn như người thật nhắn, kể cả khi
+    toàn bộ văn bản vẫn dưới ngưỡng cứng. Một câu dài hơn ngưỡng mềm nhưng
+    dưới ngưỡng cứng được giữ nguyên thành 1 bong bóng; vượt ngưỡng cứng thì
+    cắt cứng như thường. do_dai_muc_tieu = 0: hành vi cũ nguyên vẹn (chỉ
+    chia khi vượt ngưỡng cứng, gộp tối đa tới ngưỡng cứng).
     """
     if not text:
         return []
     toi_da = max(20, int(do_dai_toi_da or 350))
     text = str(text).strip()
+    try:
+        muc_tieu = int(do_dai_muc_tieu or 0)
+    except (TypeError, ValueError):
+        muc_tieu = 0
+    if muc_tieu > 0:
+        muc_tieu = min(muc_tieu, toi_da)
+        return _gop_don_vi(_don_vi_tu_nhien(text, toi_da), muc_tieu) or [text]
     if len(text) <= toi_da:
         return [text]
     # Đơn vị nhỏ: (nội dung, co_xuong_dong_truoc) — đoạn gốc giữ xuống dòng,
@@ -144,18 +196,4 @@ def chia_tin_nhan(text: str, do_dai_toi_da: int = 350) -> list[str]:
                 else:
                     for j, manh in enumerate(_cat_cung(cau, toi_da)):
                         don_vi.append((manh, vi_tri == 0 and j == 0))
-    phan_hoan_chinh: list[str] = []
-    hien_tai = ""
-    for noi_dung, xuong_dong in don_vi:
-        if not hien_tai:
-            hien_tai = noi_dung
-            continue
-        dau_noi = "\n" if xuong_dong else " "
-        if len(hien_tai) + len(dau_noi) + len(noi_dung) <= toi_da:
-            hien_tai = hien_tai + dau_noi + noi_dung
-        else:
-            phan_hoan_chinh.append(hien_tai)
-            hien_tai = noi_dung
-    if hien_tai:
-        phan_hoan_chinh.append(hien_tai)
-    return [p for p in (x.strip() for x in phan_hoan_chinh) if p]
+    return _gop_don_vi(don_vi, toi_da)

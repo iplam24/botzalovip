@@ -5,7 +5,7 @@ from ..database import get_db
 from ..models import ZaloAccount, User
 from ..schemas import InboundIn
 from ..deps import get_current_user
-from ..services.orchestrator import process_inbound
+from ..services.orchestrator import tiep_nhan_tin_den
 from ..services.zalo_connector import MockZaloConnector, ZaloOAStubConnector, ZaloPersonalConnector
 router = APIRouter(prefix="/api/zalo", tags=["Tài khoản Zalo"])
 @router.get("/tai-khoan")
@@ -26,10 +26,10 @@ def list_a(db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     return ket_qua
 @router.post("/mock/nhan-tin-nhan")
 def mock_inbound(data: InboundIn, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
-    return process_inbound(db, data.external_id, data.customer_external_id, data.customer_name, data.content,
-                           data.zalo_account_id, mentions=data.mentions, la_nhom=data.la_nhom,
-                           bot_uid=data.bot_uid, nguoi_gui_id=data.nguoi_gui_id, cli_msg_id=data.cli_msg_id,
-                           dinh_kem=data.dinh_kem)
+    return tiep_nhan_tin_den(db, data.external_id, data.customer_external_id, data.customer_name, data.content,
+                             data.zalo_account_id, mentions=data.mentions, la_nhom=data.la_nhom,
+                             bot_uid=data.bot_uid, nguoi_gui_id=data.nguoi_gui_id, cli_msg_id=data.cli_msg_id,
+                             dinh_kem=data.dinh_kem)
 @router.post("/kiem-tra-connector")
 def check_connector(db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     mock = MockZaloConnector().status(); oa = ZaloOAStubConnector("").status(); ca_nhan = ZaloPersonalConnector().status()
@@ -93,10 +93,10 @@ async def webhook_ca_nhan(req: Request, db: Session = Depends(get_db), x_connect
     # Trường nhóm Zalo (mục 7): sidecar gửi kèm mentions + cờ nhóm + UID của bot
     mentions = body.get("mentions") if isinstance(body.get("mentions"), list) else None
     la_nhom = bool(body.get("la_nhom") or body.get("loai_thread") == 1 or body.get("thread_type") == 1)
-    return process_inbound(db, str(external_id), str(customer_external_id), str(customer_name), str(content),
-                           body.get("zalo_account_id"), channel="ca_nhan",
-                           mentions=mentions, la_nhom=la_nhom,
-                           bot_uid=str(body.get("bot_uid") or body.get("tai_khoan_id") or ""),
-                           nguoi_gui_id=str(body.get("nguoi_gui_id") or body.get("uid_from") or ""),
-                           cli_msg_id=str(body.get("cli_msg_id") or body.get("cliMsgId") or ""),
-                           dinh_kem=dinh_kem)
+    return tiep_nhan_tin_den(db, str(external_id), str(customer_external_id), str(customer_name), str(content),
+                             body.get("zalo_account_id"), channel="ca_nhan",
+                             mentions=mentions, la_nhom=la_nhom,
+                             bot_uid=str(body.get("bot_uid") or body.get("tai_khoan_id") or ""),
+                             nguoi_gui_id=str(body.get("nguoi_gui_id") or body.get("uid_from") or ""),
+                             cli_msg_id=str(body.get("cli_msg_id") or body.get("cliMsgId") or ""),
+                             dinh_kem=dinh_kem)
