@@ -105,9 +105,10 @@ def seed():
             db.rollback()
         if not db.query(AIProviderConfig).filter(AIProviderConfig.provider == "mock").first():
             db.add(AIProviderConfig(name="Mock AI (mô phỏng)", provider="mock", model="mock-model", api_key_encrypted=encrypt_secret("mock-key-123456"), is_default=True, status="da_ket_noi")); db.commit()
-        # Tự chữa dữ liệu mặc định: không bao giờ để >1 provider is_default,
-        # và Mock không được giữ mặc định khi đã có provider thật đang bật
+        # Tự chữa dữ liệu mặc định: không bao giờ để >1 provider is_default
         # (dữ liệu cũ từng khiến bot trả lời bằng câu mẫu mô phỏng ngoài thật).
+        # Nhiều mặc định → giữ provider thật. Mock là mặc định DUY NHẤT thì
+        # GIỮ NGUYÊN: đó là lựa chọn tường minh của admin, không tự ý chuyển.
         try:
             mac_dinh = db.query(AIProviderConfig).filter(AIProviderConfig.is_default == True).order_by(AIProviderConfig.id).all()
             if len(mac_dinh) > 1:
@@ -116,10 +117,6 @@ def seed():
                     if p.id != giu.id:
                         p.is_default = False
                 db.commit()
-            elif len(mac_dinh) == 1 and mac_dinh[0].provider == "mock":
-                that = db.query(AIProviderConfig).filter(AIProviderConfig.provider != "mock", AIProviderConfig.is_active == True).order_by(AIProviderConfig.id).first()
-                if that:
-                    mac_dinh[0].is_default = False; that.is_default = True; db.commit()
         except Exception:
             db.rollback()
         # Cấu hình mẫu LAM Token - code: KHÔNG hard-code khóa API.

@@ -449,12 +449,15 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
         return m.content
     lich_su = [{"role": "user" if m.sender_type == "khach" else "assistant", "content": _noi_dung_lich_su(m)}
                for m in reversed(dong_ls) if m.content and not _la_tin_sticker(m)]
+    # Cổng chống vớ vẩn trong nhóm là TÙY CHỌN (nhom_chong_rep_vo_van, mặc
+    # định TẮT theo chốt 23/10/2026: trong nhóm tag là rep tất cả, không lọc).
+    luat_nhom_ap = bool(la_nhom and cai_dat.get("nhom_chong_rep_vo_van"))
     try:
         reply, model_used = ai_gateway.generate_reply(
             db, provider, content, chunks, memories,
             goi_y_hoi_sdt=(hoi_sdt and not la_mock), lich_su=lich_su, cai_dat=cai_dat,
             dich_vu=dich_vu_pr, ho_so_khach=(cust.memory_summary or ""),
-            anh_data_uri=anh_data_uri, luat_nhom=la_nhom)
+            anh_data_uri=anh_data_uri, luat_nhom=luat_nhom_ap)
     except ai_gateway.LoiVision as e:
         # Model phía sau provider KHÔNG hỗ trợ xem ảnh: ghi nhật ký riêng
         # "provider_khong_ho_tro_anh" + đánh dấu lên tin của khách để admin
@@ -497,7 +500,7 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
                     db, provider, content, chunks, memories,
                     goi_y_hoi_sdt=(hoi_sdt and not la_mock), lich_su=lich_su, cai_dat=cai_dat,
                     dich_vu=dich_vu_pr, ho_so_khach=(cust.memory_summary or ""),
-                    anh_data_uri=anh_data_uri, luat_nhom=la_nhom,
+                    anh_data_uri=anh_data_uri, luat_nhom=luat_nhom_ap,
                     chi_dan_bo_sung=chi_dan_lai)
                 if (reply_moi or "").strip():
                     reply, model_used = reply_moi, model_moi
@@ -519,7 +522,7 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
     # nội dung. Thấy token này ở lượt NHÓM thì IM LẶNG hẳn: không gửi tin,
     # không sticker (sticker chỉ chạy trong _send_reply). Lượt 1-1 KHÔNG áp
     # chốt này — giữ nguyên hành vi hiện tại.
-    if la_nhom and (reply or "").strip() == "[BO_QUA]":
+    if la_nhom and cai_dat.get("nhom_chong_rep_vo_van") and (reply or "").strip() == "[BO_QUA]":
         db.add(SystemLog(level="info", module="orchestrator",
                          message=f"bo_qua_nhom_vo_van conv={conv.id}", trace_id=trace)); db.commit()
         return {"trung": False, "trace_id": trace, "tra_loi": None, "ly_do": "bo_qua_nhom_vo_van",

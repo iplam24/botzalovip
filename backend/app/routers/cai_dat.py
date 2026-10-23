@@ -189,6 +189,8 @@ DANG_KY_CAI_DAT = [
        "Đã ngừng áp dụng — bot trả lời mọi nhóm khi được tag; dùng 'Danh sách nhóm bị chặn' để loại trừ nhóm cụ thể. Khóa này giữ lại chỉ để tương thích dữ liệu cũ.", "textarea", ""),
     _k("danh_sach_nhom_bi_chan", "nhom_gui_tin", "Danh sách nhóm bị chặn (ID nhóm, phân cách dấu phẩy)",
        "Bot KHÔNG trả lời trong các nhóm này kể cả khi được tag đích danh. Để trống = không chặn nhóm nào (bot trả lời mọi nhóm khi được tag).", "textarea", ""),
+    _k("nhom_chong_rep_vo_van", "nhom_gui_tin", "Chặn rep tin vớ vẩn trong nhóm",
+       "Bật: khi được tag trong nhóm, AI tự bỏ qua tin chỉ là chửi thề/bả/spam/không nội dung (bot im lặng). Tắt: tag là bot trả lời tất cả, không lọc (chốt của chủ hệ thống 23/10/2026).", "bool", False),
     # ---- Nhóm: Hệ thống & module ----
     _k("bo_nho_tom_tat_sau_bao_nhieu_tin", "he_thong", "Tóm tắt hồ sơ khách sau mỗi (tin nhắn của khách)",
        "Sau mỗi bấy nhiêu tin nhắn mới của khách, bot tự tóm tắt gộp thành hồ sơ dài hạn (bot nhớ về khách) và dùng trong các lượt trả lời sau.", "so", 6, min=1, max=100),

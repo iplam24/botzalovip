@@ -376,19 +376,19 @@ def parse_chat_response(raw_text: str, content_type: str = ""):
     raise AIError("Không phân tích được phản hồi từ nhà cung cấp AI (không phải JSON cũng không phải SSE hợp lệ)")
 
 def get_default_provider(db: Session):
-    """Provider mặc định: ưu tiên provider THẬT đang bật + là mặc định.
-
-    Mock (mô phỏng) không bao giờ được thắng một provider thật: dữ liệu cũ
-    từng có lúc 2 provider cùng is_default=True (kể cả Mock) khiến bot trả
-    lời bằng câu mẫu mô phỏng trên môi trường thật. Thứ tự ưu tiên:
-    mặc định + thật -> thật đang bật -> mặc định bất kỳ -> đang bật bất kỳ.
-    """
+    """Provider mặc định — tôn trọng lựa chọn is_default của admin:
+    1) Trong các provider đang bật + là mặc định: THẬT thắng Mock (chặn sự
+       cố 23/10: 2 provider cùng mặc định gồm Mock → bot rep câu mẫu).
+    2) Không có mặc định nào đang bật: provider thật đang bật (id nhỏ nhất).
+    3) Bất kỳ provider nào đang bật.
+    Mock là mặc định DUY NHẤT thì vẫn được chọn — đó là lựa chọn tường minh
+    của admin, không tự ý ghi đè (bản vá đầu viết quá tay ở bước này, khiến
+    mặc định Mock bị provider thật chưa cấu hình khóa đè lên)."""
     q = db.query(AIProviderConfig).filter(AIProviderConfig.is_active == True)
     return (q.filter(AIProviderConfig.is_default == True, AIProviderConfig.provider != "mock")
              .order_by(AIProviderConfig.id).first()
-            or q.filter(AIProviderConfig.provider != "mock")
-             .order_by(AIProviderConfig.is_default.desc(), AIProviderConfig.id).first()
             or q.filter(AIProviderConfig.is_default == True).order_by(AIProviderConfig.id).first()
+            or q.filter(AIProviderConfig.provider != "mock").order_by(AIProviderConfig.id).first()
             or q.order_by(AIProviderConfig.id).first())
 
 CHI_DAN_LUAT_NHOM = (

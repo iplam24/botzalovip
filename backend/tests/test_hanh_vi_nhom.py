@@ -25,7 +25,8 @@ _KHOA_DUNG = ("che_do_tro_chuyen_tu_do", "che_do_toc_do_tra_loi", "bot_gui_stick
               "bot_nhom_chi_khi_duoc_tag", "danh_sach_nhom_bi_chan", "gom_tin_lien_tiep",
               "bot_tu_nhan_them", "thu_thap_tu_hoi_sdt", "thu_thap_intent_hoi_sdt",
               "thu_thap_tu_khoa_hoi_sdt", "tin_chao_khach_moi",
-              "bo_nho_tom_tat_sau_bao_nhieu_tin", "module_thu_thap_thong_tin")
+              "bo_nho_tom_tat_sau_bao_nhieu_tin", "module_thu_thap_thong_tin",
+              "nhom_chong_rep_vo_van")
 
 BOT_UID = "bot-uid-hv"
 
@@ -159,6 +160,7 @@ def test_98_f1_nhom_ai_bo_qua_thi_bot_im_lang(monkeypatch):
     bat = {}
     _lap_ai_kich_ban(monkeypatch, ["[BO_QUA]"], bat)
     chup = _chup_cai_dat(); _cai_dat_nen()
+    _dat_cai_dat(nhom_chong_rep_vo_van=True)  # cổng là tùy chọn — test này bật cổng
     try:
         r = _gui_nhom("hv-f1-1", "nhom-hv-f1", "Huy", "@Quỳnh Hoa cc ngu")
         j = r.json()
@@ -199,6 +201,26 @@ def test_100_f1_chat_1_1_khong_ap_chot_bo_qua(monkeypatch):
         assert bat["kwargs"].get("luat_nhom") is False
         gui = _cac_lan_gui(ghi)
         assert gui and gui[0][3] == 0, gui
+    finally:
+        _phuc_hoi(chup)
+
+
+def test_115_f1_cong_tat_mac_dinh_tag_chui_van_rep(monkeypatch):
+    """Chốt của LAM 23/10/2026: cổng chống vớ vẩn trong nhóm MẶC ĐỊNH TẮT —
+    tag chửi trong nhóm vẫn được rep như thường, luật nhóm không được truyền."""
+    _lap_fake(monkeypatch, ghi := [])
+    bat = {}
+    _lap_ai_kich_ban(monkeypatch, ["Ê chửi gì chửi, vào đây nói chuyện đàng hoàng nè =))"], bat)
+    chup = _chup_cai_dat(); _cai_dat_nen()
+    _dat_cai_dat(nhom_chong_rep_vo_van=False)  # chốt mới: cổng TẮT
+    try:
+        r = _gui_nhom("hv-f1-4", "nhom-hv-f1", "Huy", "@Quỳnh Hoa con chó")
+        j = r.json()
+        assert r.status_code == 200, r.text
+        assert j["tra_loi"] and "đàng hoàng" in j["tra_loi"], j
+        assert bat["kwargs"].get("luat_nhom") is False  # cổng tắt → không truyền luật nhóm
+        gui = _cac_lan_gui(ghi)
+        assert gui and all(g[3] == 1 for g in gui), gui  # vẫn gửi vào nhóm
     finally:
         _phuc_hoi(chup)
 
