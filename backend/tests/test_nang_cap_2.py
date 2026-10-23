@@ -103,7 +103,7 @@ def test_44_chia_tin_tich_hop_va_tat_thi_gui_mot_tin(monkeypatch):
     from app.services import orchestrator
     gui = []
     class FakePersonal:
-        def send_text(self, thread_id, text):
+        def send_text(self, thread_id, text, loai_thread=0):
             gui.append(text); return {"thanh_cong": True}
         def tha_tim(self, *a, **k): return {"thanh_cong": True}
     monkeypatch.setattr(orchestrator, "ZaloPersonalConnector", lambda: FakePersonal())
@@ -143,7 +143,7 @@ def test_45_logic_nhom_tag_dich_danh(monkeypatch):
     from app.services import orchestrator
     gui = []
     class FakePersonal:
-        def send_text(self, thread_id, text):
+        def send_text(self, thread_id, text, loai_thread=0):
             gui.append((thread_id, text)); return {"thanh_cong": True}
         def tha_tim(self, *a, **k): return {"thanh_cong": True}
         def status(self): return {"tai_khoan_id": "bot-uid-1"}
@@ -179,7 +179,7 @@ def test_46_tha_tim_bat_tat(monkeypatch):
     from app.services import orchestrator
     tim = []
     class FakePersonal:
-        def send_text(self, thread_id, text): return {"thanh_cong": True}
+        def send_text(self, thread_id, text, loai_thread=0): return {"thanh_cong": True}
         def tha_tim(self, thread_id, message_id, loai_thread=0, cli_msg_id=""):
             tim.append((thread_id, message_id, loai_thread)); return {"thanh_cong": True}
     monkeypatch.setattr(orchestrator, "ZaloPersonalConnector", lambda: FakePersonal())

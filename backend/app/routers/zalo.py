@@ -65,8 +65,14 @@ def ca_nhan_sticker_goi_y(q: str = "", u: User = Depends(get_current_user)):
 @router.post("/ca-nhan/gui-tin-nhan")
 async def ca_nhan_send(req: Request, u: User = Depends(get_current_user)):
     body = await req.json()
+    # Gửi thủ công: nếu client truyền loai_thread/thread_type (1 = nhóm) thì
+    # truyền tiếp xuống connector; không truyền -> 0 (User) như hành vi cũ.
     try:
-        return ZaloPersonalConnector().send_text(body.get("thread_id") or body.get("conversation_id") or "", body.get("content") or "")
+        loai_thread = int(body.get("loai_thread", body.get("thread_type", 0)) or 0)
+    except (TypeError, ValueError):
+        loai_thread = 0
+    try:
+        return ZaloPersonalConnector().send_text(body.get("thread_id") or body.get("conversation_id") or "", body.get("content") or "", loai_thread)
     except (RuntimeError, NotImplementedError) as e:
         raise HTTPException(502, str(e))
 

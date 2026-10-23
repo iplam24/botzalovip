@@ -9,7 +9,7 @@ class ZaloConnector(ABC):
     @abstractmethod
     def status(self): pass
     @abstractmethod
-    def send_text(self, conversation_external_id: str, text: str): pass
+    def send_text(self, conversation_external_id: str, text: str, loai_thread: int = 0): pass
     def send_image(self, cid, url): raise NotImplementedError("Chưa hỗ trợ gửi hình ảnh")
     def react(self, mid, icon): raise NotImplementedError("Chưa hỗ trợ thả cảm xúc")
     def send_sticker(self, thread_id, sticker, loai_thread=0): raise NotImplementedError("Chưa hỗ trợ gửi sticker")
@@ -20,9 +20,9 @@ class MockZaloConnector(ZaloConnector):
     def connect(self): self.connected = True; return {"trang_thai": "da_ket_noi", "moi_truong": "mo_phong"}
     def disconnect(self): self.connected = False; return {"trang_thai": "da_ngat"}
     def status(self): return {"trang_thai": "da_ket_noi" if self.connected else "mat_ket_noi", "moi_truong": "mo_phong", "ho_tro": ["send_text"]}
-    def send_text(self, cid, text):
+    def send_text(self, cid, text, loai_thread=0):
         if not self.connected: raise RuntimeError("Connector mất kết nối (mô phỏng)")
-        self.sent.append((cid, text)); return {"thanh_cong": True, "mo_phong": True}
+        self.sent.append((cid, text, loai_thread)); return {"thanh_cong": True, "mo_phong": True}
     def tha_tim(self, thread_id, message_id, loai_thread=0, cli_msg_id=""):
         self.reactions.append((str(thread_id), str(message_id), loai_thread)); return {"thanh_cong": True, "mo_phong": True}
     def typing(self, thread_id, loai_thread=0):
@@ -38,7 +38,7 @@ class ZaloOAStubConnector(ZaloConnector):
         return {"trang_thai": "chua_kiem_thu", "thong_bao": "Có token nhưng stub chưa gọi API thật trong MVP"}
     def disconnect(self): return {"trang_thai": "da_ngat"}
     def status(self): return {"trang_thai": "chua_ho_tro" if not self.token else "chua_kiem_thu", "ho_tro": []}
-    def send_text(self, cid, text): raise RuntimeError("CHƯA HỖ TRỢ: Zalo OA stub chưa kết nối API thật - cần cấu hình OA token")
+    def send_text(self, cid, text, loai_thread=0): raise RuntimeError("CHƯA HỖ TRỢ: Zalo OA stub chưa kết nối API thật - cần cấu hình OA token")
 
 mock_connector = MockZaloConnector()
 
@@ -83,9 +83,14 @@ class ZaloPersonalConnector(ZaloConnector):
             return data
         except Exception:
             return dict(self.OFFLINE)
-    def send_text(self, cid, text):
+    def send_text(self, cid, text, loai_thread=0):
+        # BẮT BUỘC kèm thread_type: sidecar chạy api.sendMessage(content,
+        # thread_id, thread_type) — thiếu trường này sidecar mặc định 0 (User)
+        # khiến tin trả lời NHÓM bị gửi theo kiểu 1-1 và không tới được nhóm
+        # (lỗi thật đã chẩn đoán: bot rep trong nhóm, DB ghi da_gui nhưng tin
+        # không hiện trong nhóm). loai_thread: 0 = User, 1 = Group (zca-js).
         try:
-            code, data = self._call("POST", "/gui-tin-nhan", {"thread_id": str(cid), "content": text})
+            code, data = self._call("POST", "/gui-tin-nhan", {"thread_id": str(cid), "content": text, "thread_type": int(loai_thread or 0)})
         except Exception as e:
             raise RuntimeError("Mất kết nối / Chưa chạy dịch vụ Zalo cá nhân") from e
         if code >= 400: raise RuntimeError(data.get("thong_bao", f"Sidecar trả lỗi {code}"))

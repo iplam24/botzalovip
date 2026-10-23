@@ -9,6 +9,10 @@ Mục 6 — Zalo không render Markdown nên mọi câu trả lời phải qua
 - Gạch đầu dòng -, *, + -> "• "; danh sách số giữ nguyên.
 - Bảng Markdown -> danh sách dòng "Tên cột: giá trị".
 - Link [chữ](url) -> "chữ (url)"; code block/inline -> bỏ backtick.
+- Đợt E: cắt token "[sticker]" lọt vào văn bản AI (AI bắt chước marker từ
+  lịch sử cũ). Sticker THẬT của bot là Message riêng (attachment_type=
+  "sticker", tạo trực tiếp ở orchestrator._gui_sticker_neu_may) — không đi
+  qua hàm này nên không bị ảnh hưởng.
 
 Mục 5 — `chia_tin_nhan()`: tách câu trả lời dài thành nhiều tin liên tiếp
 theo đoạn (xuống dòng) -> câu -> cắt cứng theo ranh giới từ, giữ thứ tự,
@@ -28,6 +32,7 @@ _TIEU_DE = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$")
 _DAU_DONG = re.compile(r"^(\s*)[-*+]\s+(.*)$")
 _DANH_SACH_SO = re.compile(r"^(\s*)(\d+)[.)]\s+(.*)$")
 _KET_CAU = re.compile(r"(?<=[.!?…])\s+")
+_TOKEN_STICKER = re.compile(r"\[\s*sticker\s*\]", re.I)
 
 
 def _sach_trong_dong(s: str) -> str:
@@ -56,6 +61,17 @@ def dinh_dang_tin_zalo(text: str) -> str:
         return ""
     # Code block: bỏ hàng rào ``` (giữ nội dung)
     text = re.sub(r"```[a-zA-Z0-9_-]*\n?", "", str(text)).replace("```", "")
+    # Đợt E: cắt marker "[sticker]" lọt vào văn bản AI trước khi xử lý dòng:
+    # dòng CHỈ chứa token -> bỏ cả dòng; token ở cuối/giữa câu -> xoá token
+    # rồi dọn khoảng trắng thừa do việc xoá để lại.
+    dong_loc: list[str] = []
+    for dong_goc in text.replace("\r\n", "\n").split("\n"):
+        if _TOKEN_STICKER.fullmatch(dong_goc.strip()):
+            continue
+        if _TOKEN_STICKER.search(dong_goc):
+            dong_goc = re.sub(r"[ \t]{2,}", " ", _TOKEN_STICKER.sub("", dong_goc))
+        dong_loc.append(dong_goc)
+    text = "\n".join(dong_loc)
     dong_tho = text.replace("\r\n", "\n").split("\n")
     ket_qua: list[str] = []
     i = 0

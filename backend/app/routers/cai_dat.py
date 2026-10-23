@@ -174,7 +174,9 @@ DANG_KY_CAI_DAT = [
     _k("ten_bot_trong_nhom", "nhom_gui_tin", "Tên bot trong nhóm",
        "Tên hiển thị của bot trong nhóm — tin nhóm chứa tên này cũng được coi là gọi bot. Để trống = chỉ tính mention UID.", "text", ""),
     _k("danh_sach_nhom_duoc_phep", "nhom_gui_tin", "Danh sách nhóm được phép (ID nhóm, phân cách dấu phẩy)",
-       "Để trống = mọi nhóm (vẫn phải tag đúng). Có danh sách = chỉ các nhóm này bot mới hoạt động.", "textarea", ""),
+       "Đã ngừng áp dụng — bot trả lời mọi nhóm khi được tag; dùng 'Danh sách nhóm bị chặn' để loại trừ nhóm cụ thể. Khóa này giữ lại chỉ để tương thích dữ liệu cũ.", "textarea", ""),
+    _k("danh_sach_nhom_bi_chan", "nhom_gui_tin", "Danh sách nhóm bị chặn (ID nhóm, phân cách dấu phẩy)",
+       "Bot KHÔNG trả lời trong các nhóm này kể cả khi được tag đích danh. Để trống = không chặn nhóm nào (bot trả lời mọi nhóm khi được tag).", "textarea", ""),
     # ---- Nhóm: Hệ thống & module ----
     _k("bo_nho_tom_tat_sau_bao_nhieu_tin", "he_thong", "Tóm tắt hồ sơ khách sau mỗi (tin nhắn của khách)",
        "Sau mỗi bấy nhiêu tin nhắn mới của khách, bot tự tóm tắt gộp thành hồ sơ dài hạn (bot nhớ về khách) và dùng trong các lượt trả lời sau.", "so", 6, min=1, max=100),

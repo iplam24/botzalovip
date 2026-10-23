@@ -78,11 +78,12 @@ def _duoc_tra_loi_trong_nhom(cai_dat: dict, content: str, mentions, bot_uid: str
     - Mention chứa đúng UID của tài khoản bot (bot_uid) -> được trả lời.
     - Mention @all (uid "-1") KHÔNG tính là tag bot.
     - Hoặc nội dung chứa tên bot đã cấu hình (ten_bot_trong_nhom).
-    - Danh sách nhóm được phép (danh_sach_nhom_duoc_phep) khác rỗng thì
-      nhóm ngoài danh sách bị chặn kể cả khi tag đúng.
+    - Chủ hệ thống chốt (đợt D): tag đúng là trả lời ở MỌI nhóm — cổng
+      danh_sach_nhom_duoc_phep đã BỎ. Ngược lại, nhóm nằm trong
+      danh_sach_nhom_bi_chan thì không trả lời kể cả khi tag đúng.
     """
-    phep = _tach_danh_sach(cai_dat.get("danh_sach_nhom_duoc_phep"))
-    if phep and str(thread_id) not in phep:
+    chan = _tach_danh_sach(cai_dat.get("danh_sach_nhom_bi_chan"))
+    if chan and str(thread_id) in chan:
         return False
     if cai_dat.get("bot_nhom_chi_khi_duoc_tag", True) is False:
         return True
@@ -327,8 +328,17 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
     dong_ls = (db.query(Message)
                .filter(Message.conversation_id == conv.id, Message.id != msg.id)
                .order_by(Message.id.desc()).limit(max(1, so_tin_ls)).all())
+    # Đợt E: KHÔNG nạp tin sticker vào lịch sử cho AI. Sticker bot đã gửi
+    # được lưu content="[sticker]" (attachment_type="sticker"); nếu nạp
+    # nguyên văn thành lượt assistant, AI sẽ BẮT CHƯỚC viết chữ "[sticker]"
+    # vào câu trả lời văn bản (lỗi thật khi test). Cũng loại các tin bot cũ
+    # chỉ chứa đúng "[sticker]" mà chưa có attachment_type.
+    def _la_tin_sticker(m) -> bool:
+        if getattr(m, "attachment_type", "") == "sticker":
+            return True
+        return m.sender_type == "bot" and (m.content or "").strip() == "[sticker]"
     lich_su = [{"role": "user" if m.sender_type == "khach" else "assistant", "content": m.content}
-               for m in reversed(dong_ls) if m.content]
+               for m in reversed(dong_ls) if m.content and not _la_tin_sticker(m)]
     try:
         reply, model_used = ai_gateway.generate_reply(
             db, provider, content, chunks, memories,
@@ -532,6 +542,13 @@ def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=N
     # "tu_nhien"/"cham" = hiện "đang soạn tin" (zca-js sendTypingEvent) rồi
     # chờ theo độ dài phần tin (tinh_do_tre) trước khi gửi — như người thật gõ.
     che_do_toc_do = str(cd.get("che_do_toc_do_tra_loi") or "tu_nhien")
+    # Loại thread của đích gửi (0 = User 1-1, 1 = Group): lấy từ tin khách
+    # đang xử lý. BẮT BUỘC truyền xuống send_text — nếu không, sidecar mặc
+    # định User và tin rep trong NHÓM không bao giờ tới được nhóm (lỗi D).
+    try:
+        loai_gui = int(tin_khach.get("loai_thread") or 0) if tin_khach else 0
+    except (TypeError, ValueError):
+        loai_gui = 0
     for idx, phan in enumerate(cac_phan):
         if idx > 0 and do_tre_ms > 0:
             time.sleep(do_tre_ms / 1000.0)
@@ -547,7 +564,7 @@ def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=N
                         tre = max(0, tre - do_tre_ms)  # đã nghỉ do_tre_ms ở trên
                     if tre > 0:
                         time.sleep(tre / 1000.0)
-                ZaloPersonalConnector().send_text(str(cust.external_id), phan)
+                ZaloPersonalConnector().send_text(str(cust.external_id), phan, loai_gui)
             else:
                 mock_connector.send_text(str(conv.id), phan)
             db.add(Message(conversation_id=conv.id, external_id=None, sender_type="bot", content=phan, status="da_gui"))
