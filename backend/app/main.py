@@ -7,12 +7,12 @@ from .models import User, AIProviderConfig, ZaloAccount, SystemLog
 from .security import hash_password, encrypt_secret
 import os
 from .config import settings
-from .routers import auth, ai_providers, customers, conversations, services_router, knowledge, memories, automation, zalo, logs_analytics, backup, ai_test, cai_dat, notifications, ban_be, cau_hinh_chat
+from .routers import auth, ai_providers, customers, conversations, services_router, knowledge, memories, automation, zalo, logs_analytics, backup, ai_test, cai_dat, notifications, ban_be, cau_hinh_chat, tep
 
 app = FastAPI(title="Zalo AI Hub", description="Nền tảng AI tự động hóa Zalo - giao diện và API tiếng Việt", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://localhost:3000"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-for r in [auth.router, ai_providers.router, customers.router, conversations.router, services_router.router, knowledge.router, memories.router, automation.router, zalo.router, logs_analytics.router, backup.router, ai_test.router, cai_dat.router, notifications.router, ban_be.router, cau_hinh_chat.router]:
+for r in [auth.router, ai_providers.router, customers.router, conversations.router, services_router.router, knowledge.router, memories.router, automation.router, zalo.router, logs_analytics.router, backup.router, ai_test.router, cai_dat.router, notifications.router, ban_be.router, cau_hinh_chat.router, tep.router]:
     app.include_router(r)
 
 def seed():
@@ -58,6 +58,15 @@ def seed():
                         conn.execute(text(f"ALTER TABLE {bang} ADD COLUMN embedding TEXT DEFAULT ''"))
             except Exception:
                 pass
+        # Bot xem ảnh: cột đính kèm cho messages (TEXT/VARCHAR — hợp lệ cả
+        # Postgres lẫn SQLite; mỗi cột một giao dịch riêng như các đợt trước).
+        msg_cols = [c["name"] for c in insp.get_columns("messages")]
+        if "attachment_url" not in msg_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE messages ADD COLUMN attachment_url TEXT DEFAULT ''"))
+        if "attachment_type" not in msg_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE messages ADD COLUMN attachment_type VARCHAR DEFAULT ''"))
         # Trên Postgres (image pgvector): thử bật extension vector để sẵn sàng
         # cho nâng cấp sau. Việc truy hồi hiện tại vẫn dùng JSON + cosine Python
         # (đã ghi rõ trong BAO_CAO) nên bật extension thất bại cũng KHÔNG sao.

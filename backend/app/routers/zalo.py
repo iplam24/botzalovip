@@ -28,7 +28,8 @@ def list_a(db: Session = Depends(get_db), u: User = Depends(get_current_user)):
 def mock_inbound(data: InboundIn, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     return process_inbound(db, data.external_id, data.customer_external_id, data.customer_name, data.content,
                            data.zalo_account_id, mentions=data.mentions, la_nhom=data.la_nhom,
-                           bot_uid=data.bot_uid, nguoi_gui_id=data.nguoi_gui_id, cli_msg_id=data.cli_msg_id)
+                           bot_uid=data.bot_uid, nguoi_gui_id=data.nguoi_gui_id, cli_msg_id=data.cli_msg_id,
+                           dinh_kem=data.dinh_kem)
 @router.post("/kiem-tra-connector")
 def check_connector(db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     mock = MockZaloConnector().status(); oa = ZaloOAStubConnector("").status(); ca_nhan = ZaloPersonalConnector().status()
@@ -73,7 +74,12 @@ async def webhook_ca_nhan(req: Request, db: Session = Depends(get_db), x_connect
     customer_external_id = body.get("customer_external_id") or body.get("thread_id") or body.get("sender_id") or "ca-nhan-khong-ro"
     customer_name = body.get("customer_name") or body.get("sender_name") or "Khách Zalo cá nhân"
     content = body.get("content") or body.get("message") or body.get("text") or ""
-    if not external_id or not content:
+    # Đính kèm (ảnh khách gửi): sidecar trích thành [{loai: "anh", url, url_thumb}].
+    # Tin CHỈ có ảnh (không có chữ) vẫn hợp lệ — không còn bắt buộc content.
+    dinh_kem = [dk for dk in (body.get("dinh_kem") or [])
+                if isinstance(dk, dict) and dk.get("loai") == "anh" and dk.get("url")] \
+        if isinstance(body.get("dinh_kem"), list) else []
+    if not external_id or (not content and not dinh_kem):
         raise HTTPException(400, "Thiếu external_id hoặc nội dung tin nhắn")
     # Trường nhóm Zalo (mục 7): sidecar gửi kèm mentions + cờ nhóm + UID của bot
     mentions = body.get("mentions") if isinstance(body.get("mentions"), list) else None
@@ -83,4 +89,5 @@ async def webhook_ca_nhan(req: Request, db: Session = Depends(get_db), x_connect
                            mentions=mentions, la_nhom=la_nhom,
                            bot_uid=str(body.get("bot_uid") or body.get("tai_khoan_id") or ""),
                            nguoi_gui_id=str(body.get("nguoi_gui_id") or body.get("uid_from") or ""),
-                           cli_msg_id=str(body.get("cli_msg_id") or body.get("cliMsgId") or ""))
+                           cli_msg_id=str(body.get("cli_msg_id") or body.get("cliMsgId") or ""),
+                           dinh_kem=dinh_kem)

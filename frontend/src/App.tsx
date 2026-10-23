@@ -21,6 +21,7 @@ const PhanTich = lazy(() => import("./pages/PhanTich"));
 const SaoLuu = lazy(() => import("./pages/SaoLuu"));
 const CaiDat = lazy(() => import("./pages/CaiDat"));
 const TroLyCauHinh = lazy(() => import("./pages/TroLyCauHinh"));
+const PromptTongQuat = lazy(() => import("./pages/PromptTongQuat"));
 const KiemThuAI = lazy(() => import("./pages/KiemThuAI"));
 const NguoiDung = lazy(() => import("./pages/NguoiDung"));
 
@@ -42,6 +43,7 @@ const MENU: { ten: string; icon: string; thanhPhan: any }[] = [
   { ten: "Sao lưu và khôi phục", icon: "fa-solid fa-database", thanhPhan: SaoLuu },
   { ten: "Người dùng", icon: "fa-solid fa-user-gear", thanhPhan: NguoiDung },
   { ten: "Cài đặt", icon: "fa-solid fa-gear", thanhPhan: CaiDat },
+  { ten: "Prompt tổng quát", icon: "fa-solid fa-scroll", thanhPhan: PromptTongQuat },
   { ten: "Trợ lý cấu hình", icon: "fa-solid fa-terminal", thanhPhan: TroLyCauHinh },
   { ten: "Trung tâm kiểm thử AI", icon: "fa-solid fa-flask", thanhPhan: KiemThuAI },
 ];

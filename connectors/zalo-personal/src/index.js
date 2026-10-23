@@ -86,6 +86,39 @@ async function capNhatThongTinTaiKhoan() {
   thongTinTaiKhoan.phien_bat_dau_luc = new Date().toISOString();
 }
 
+// Trích đính kèm ẢNH từ tin zca-js. Cấu trúc thật (đã kiểm chứng trong
+// node_modules/zca-js/dist/models/Message.d.ts): với tin có đính kèm,
+// msg.data.content là OBJECT TAttachmentContent {title, description, href,
+// thumb, childnumber, action, params, type} — href là URL ảnh đầy đủ,
+// thumb là URL ảnh thu nhỏ; msg.data.msgType cho biết loại tin
+// (vd "chat.photo" cho ảnh). Một số dạng cũ có thể nằm ở msg.data.attachments.
+// Sticker (msgType chứa "sticker") KHÔNG tính là ảnh khách gửi.
+function trichDinhKemAnh(msg) {
+  const dinhKem = [];
+  const msgType = String(msg?.data?.msgType || "");
+  if (/sticker/i.test(msgType)) return dinhKem;
+  const laLoaiAnh = /photo|image|gif|pict/i.test(msgType);
+  const coDuoiAnh = (u) => /\.(jpe?g|png|gif|webp|bmp)(\?|#|$)/i.test(String(u || ""));
+  const xetMot = (href, thumb) => {
+    const url = typeof href === "string" ? href : "";
+    if (!url) return;
+    if (!laLoaiAnh && !coDuoiAnh(url)) return; // không có dấu hiệu là ảnh thì bỏ qua
+    if (dinhKem.some((d) => d.url === url)) return;
+    dinhKem.push({ loai: "anh", url, url_thumb: typeof thumb === "string" && thumb ? thumb : url });
+  };
+  const c = msg?.data?.content;
+  if (c && typeof c === "object" && !Array.isArray(c)) {
+    xetMot(c.href, c.thumb);
+  }
+  const atts = msg?.data?.attachments;
+  if (Array.isArray(atts)) {
+    for (const a of atts) {
+      if (a && typeof a === "object") xetMot(a.href || a.url, a.thumb || a.thumbnail);
+    }
+  }
+  return dinhKem;
+}
+
 async function forwardMessage(msg) {
   // Tin do CHÍNH tài khoản bot gửi (isSelf) không chuyển về backend:
   // tránh bot tự xử lý tin của mình (vòng lặp) trong cả chat 1-1 lẫn nhóm.
@@ -104,6 +137,9 @@ async function forwardMessage(msg) {
     customer_external_id: String(msg?.threadId || msg?.data?.uidFrom || ""),
     customer_name: String(msg?.data?.dName || "Khách Zalo cá nhân"),
     content: typeof msg?.data?.content === "string" ? msg.data.content : "",
+    // Đính kèm ảnh (nếu có) — backend tải về và cho bot "nhìn" ảnh.
+    // Payload cũ không đổi; chỉ THÊM trường dinh_kem khi thật có ảnh.
+    dinh_kem: trichDinhKemAnh(msg),
     // Trường nhóm (Đợt nâng cấp 2 mục 7): backend quyết định trả lời hay im lặng.
     la_nhom: laNhom,
     loai_thread: loaiThread,
@@ -112,7 +148,8 @@ async function forwardMessage(msg) {
     cli_msg_id: String(msg?.data?.cliMsgId || ""),
     bot_uid: thongTinTaiKhoan.tai_khoan_id || "",
   };
-  if (!payload.content) return;
+  // Tin CHỈ có ảnh (không chữ) vẫn phải chuyển về backend; tin rỗng hoàn toàn thì bỏ.
+  if (!payload.content && payload.dinh_kem.length === 0) return;
   try {
     await fetch(`${BACKEND_URL}/api/zalo/webhook/ca-nhan`, {
       method: "POST",

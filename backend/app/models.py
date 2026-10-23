@@ -66,6 +66,9 @@ class Message(Base):
     external_id = Column(String, nullable=True, index=True)  # chống trùng
     sender_type = Column(String, default="khach")  # khach, bot, nhan_vien, he_thong
     content = Column(Text, default=""); status = Column(String, default="da_gui")
+    # Đính kèm (ảnh khách gửi): attachment_type: "" | "anh";
+    # attachment_url: "/api/tep/<tên file>" nếu đã tải về máy chủ, hoặc URL gốc của Zalo khi tải lỗi.
+    attachment_url = Column(Text, default=""); attachment_type = Column(String, default="")
     error = Column(Text, default=""); created_at = Column(DateTime, default=now)
     conversation = relationship("Conversation", back_populates="messages")
 

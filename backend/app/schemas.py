@@ -43,6 +43,8 @@ class InboundIn(BaseModel):
     # Trường nhóm Zalo (Đợt nâng cấp 2, mục 7) — mô phỏng được qua endpoint mock:
     la_nhom: bool = False; mentions: Optional[list] = None; bot_uid: str = ""
     nguoi_gui_id: str = ""; cli_msg_id: str = ""
+    # Đính kèm ảnh khách gửi: [{loai: "anh", url, url_thumb}] — bot xem được ảnh
+    dinh_kem: Optional[list] = None
 class SendMessageIn(BaseModel): content: str; sender_type: str = "nhan_vien"
 class AITestIn(BaseModel): question: str; provider_id: Optional[int] = None; service_id: Optional[int] = None
 class RetrieveIn(BaseModel): query: str; limit: int = 5

@@ -46,7 +46,7 @@ def get_c(cid:int, db: Session = Depends(get_db), u: User = Depends(get_current_
     c=db.get(Conversation,cid)
     if not c: raise HTTPException(404,"Không tìm thấy")
     msgs=db.query(Message).filter(Message.conversation_id==cid).order_by(Message.created_at).all()
-    return {**out(c, db), "messages": [{"id": m.id, "sender_type": m.sender_type, "content": m.content, "external_id": m.external_id, "status": m.status, "error": m.error, "created_at": str(m.created_at) if m.created_at else ""} for m in msgs]}
+    return {**out(c, db), "messages": [{"id": m.id, "sender_type": m.sender_type, "content": m.content, "external_id": m.external_id, "status": m.status, "error": m.error, "attachment_url": getattr(m, "attachment_url", "") or "", "attachment_type": getattr(m, "attachment_type", "") or "", "created_at": str(m.created_at) if m.created_at else ""} for m in msgs]}
 @router.post("/{cid}/tam-dung-bot")
 def pause(cid:int, db: Session = Depends(get_db), u: User = Depends(get_current_user)):
     c=db.get(Conversation,cid)

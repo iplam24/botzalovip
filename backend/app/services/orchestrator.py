@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from ..models import Customer, Conversation, Message, SystemLog, ServiceItem, User, PhanBoBanBe
 from .text_utils import classify_intent, normalize_vi
-from . import knowledge_service, memory_service, ai_gateway, automation_service, extraction_service, notification_service
+from . import knowledge_service, memory_service, ai_gateway, automation_service, extraction_service, notification_service, anh_service
 from .zalo_connector import mock_connector, ZaloPersonalConnector
 from .dinh_dang import dinh_dang_tin_zalo, chia_tin_nhan
 
@@ -142,7 +142,7 @@ def _gan_admin_tu_ban_be(db: Session, cust: Customer, conv: Conversation, custom
 def process_inbound(db: Session, external_id: str, customer_external_id: str, customer_name: str, content: str,
                     zalo_account_id=None, channel: str = "mo_phong",
                     mentions=None, la_nhom: bool = False, bot_uid: str = "",
-                    nguoi_gui_id: str = "", cli_msg_id: str = ""):
+                    nguoi_gui_id: str = "", cli_msg_id: str = "", dinh_kem=None):
     trace = str(uuid.uuid4())[:8]
     cai_dat = _doc_cai_dat(db)
     # Chế độ trò chuyện tự do: bot nghỉ bán hàng — không hỏi SĐT, không báo
@@ -172,6 +172,32 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
     db.refresh(msg)
     db.add(SystemLog(level="info", module="orchestrator", message=f"Nhận tin từ {cust.display_name}: {content[:80]}", trace_id=trace)); db.commit()
     cust.last_interaction_at = msg.created_at or datetime.now(timezone.utc); db.commit()
+    # Đính kèm ẢNH khách gửi: tải về máy chủ (thư mục uploads) để bot "nhìn"
+    # được ảnh qua payload multimodal + admin xem lại được trong Hội thoại.
+    # Tải lỗi → vẫn lưu URL gốc của Zalo; mọi lỗi ở bước này KHÔNG chặn pipeline.
+    anh_data_uri = ""
+    for dk in (dinh_kem or []):
+        if not isinstance(dk, dict) or dk.get("loai") != "anh" or not dk.get("url"):
+            continue
+        msg.attachment_type = "anh"
+        kq_tai = None
+        try:
+            kq_tai = anh_service.tai_anh_tu_url(str(dk["url"]))
+        except Exception:
+            kq_tai = None
+        if kq_tai:
+            msg.attachment_url = f"/api/tep/{kq_tai['ten_file']}"
+            try:
+                anh_data_uri = anh_service.doc_anh_data_uri(kq_tai["duong_dan"])
+            except Exception:
+                anh_data_uri = ""
+        else:
+            msg.attachment_url = str(dk["url"])
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        break
     # Mục 7: cổng nhóm Zalo — không được tag đích danh thì IM LẶNG (đã lưu tin
     # + ghi log), không thu thập, không thông báo, không trả lời, không thả tim.
     if la_nhom:
@@ -305,7 +331,25 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
         reply, model_used = ai_gateway.generate_reply(
             db, provider, content, chunks, memories,
             goi_y_hoi_sdt=(hoi_sdt and not la_mock), lich_su=lich_su, cai_dat=cai_dat,
-            dich_vu=dich_vu_pr, ho_so_khach=(cust.memory_summary or ""))
+            dich_vu=dich_vu_pr, ho_so_khach=(cust.memory_summary or ""),
+            anh_data_uri=anh_data_uri)
+    except ai_gateway.LoiVision as e:
+        # Model phía sau provider KHÔNG hỗ trợ xem ảnh: ghi nhật ký riêng
+        # "provider_khong_ho_tro_anh" + đánh dấu lên tin của khách để admin
+        # biết, rồi trả câu dự phòng lịch sự thay vì im lặng/sập pipeline.
+        db.add(SystemLog(level="warning", module="ai_gateway",
+                         message=f"provider_khong_ho_tro_anh conv={conv.id} msg={msg.id}: {e}",
+                         trace_id=trace)); db.commit()
+        try:
+            msg.error = "provider_khong_ho_tro_anh"; db.commit()
+        except Exception:
+            db.rollback()
+        cau_du_phong_anh = ("Dạ em đã nhận được ảnh của anh/chị rồi ạ. Hiện hệ thống bên em chưa xem rõ "
+                            "được nội dung ảnh này, anh/chị mô tả thêm giúp em, hoặc em chuyển nhân viên "
+                            "xem trực tiếp cho mình nhé.")
+        return _send_reply(db, conv, cust, cau_du_phong_anh, trace, intent=intent, channel=channel,
+                           cai_dat=cai_dat,
+                           tin_khach=_tin_khach(customer_external_id, external_id, cli_msg_id, la_nhom))
     except ai_gateway.AIError as e:
         db.add(SystemLog(level="error", module="orchestrator", message=f"Lỗi AI: {e}", trace_id=trace)); db.commit()
         _thong_bao(db, "bot_khong_tra_loi_duoc", "Bot không trả lời được", f"Bot không trả lời được khách {cust.display_name or cust.external_id} do lỗi nhà cung cấp AI: {e}", cust, conv, "canh_bao", channel)

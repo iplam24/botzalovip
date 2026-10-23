@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, dinhDangThoiGian } from "../lib/api";
+import { api, apiTaiFile, dinhDangThoiGian } from "../lib/api";
 import { ChuaCoDuLieu, DangTai, HuyHieuTrangThai, LoiTai, Nut, PhanTrang, ThongBao, TieuDeTrang, oNhap } from "../components/dungChung";
 import { useToast } from "../components/Toast";
 
@@ -14,6 +14,48 @@ const NHAN_NGUOI_GUI: Record<string, string> = {
   nhan_vien: "Nhân viên",
   he_thong: "Hệ thống",
 };
+
+// Ảnh đính kèm trong tin nhắn: nếu là ảnh đã tải về máy chủ (đường dẫn
+// /api/tep/...) thì phải tải qua API kèm token rồi hiển thị bằng object URL;
+// nếu là URL gốc của Zalo (khi tải về lỗi) thì dùng thẳng làm nguồn ảnh.
+// Bấm vào ảnh để mở xem lớn ở tab mới.
+function AnhDinhKem({ nguon }: { nguon: string }) {
+  const noiBo = (nguon || "").startsWith("/api/");
+  const [urlHien, setUrlHien] = useState(noiBo ? "" : nguon);
+  const [loiAnh, setLoiAnh] = useState(false);
+  useEffect(() => {
+    if (!noiBo) { setUrlHien(nguon); return; }
+    let huy = false;
+    let objUrl = "";
+    (async () => {
+      try {
+        const { blob } = await apiTaiFile(nguon);
+        objUrl = URL.createObjectURL(blob);
+        if (!huy) setUrlHien(objUrl);
+      } catch {
+        if (!huy) setLoiAnh(true);
+      }
+    })();
+    return () => { huy = true; if (objUrl) URL.revokeObjectURL(objUrl); };
+  }, [nguon, noiBo]);
+  if (loiAnh) {
+    return (
+      <p className="text-xs text-gray-500 mt-1">
+        <i className="fa-regular fa-image mr-1" />Không tải được ảnh đính kèm.
+      </p>
+    );
+  }
+  if (!urlHien) {
+    return <p className="text-xs text-gray-400 mt-1"><i className="fa-regular fa-image mr-1" />Đang tải ảnh...</p>;
+  }
+  return (
+    <a href={urlHien} target="_blank" rel="noreferrer" title="Bấm để xem ảnh lớn">
+      <img src={urlHien} alt="Ảnh khách gửi"
+        className="mt-1.5 max-w-[260px] max-h-[260px] w-auto rounded-lg border dark:border-neutral-700 object-contain cursor-zoom-in"
+        onError={() => setLoiAnh(true)} />
+    </a>
+  );
+}
 
 export default function HoiThoai() {
   const toast = useToast();
@@ -285,6 +327,9 @@ export default function HoiThoai() {
                             {NHAN_NGUOI_GUI[m.sender_type] || m.sender_type}
                           </p>
                           <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
+                          {m.attachment_type === "anh" && m.attachment_url && (
+                            <AnhDinhKem nguon={m.attachment_url} />
+                          )}
                           <p className="text-[11px] text-gray-400 mt-1 text-right">
                             {dinhDangThoiGian(m.created_at)}
                             {!benKhach && m.status === "da_gui" && (
@@ -295,7 +340,13 @@ export default function HoiThoai() {
                             )}
                             {m.status && m.status !== "da_gui" && m.status !== "loi_gui" ? ` · ${m.status}` : ""}
                           </p>
-                          {m.error && <p className="text-[11px] text-red-600 mt-0.5">Lỗi gửi: {m.error}</p>}
+                          {m.error === "provider_khong_ho_tro_anh" ? (
+                            <p className="text-[11px] text-amber-600 mt-0.5">
+                              <i className="fa-solid fa-eye-slash mr-1" />Bot chưa xem được ảnh này — model AI hiện tại không hỗ trợ xem ảnh, bot đã trả lời dự phòng.
+                            </p>
+                          ) : m.error ? (
+                            <p className="text-[11px] text-red-600 mt-0.5">Lỗi gửi: {m.error}</p>
+                          ) : null}
                         </div>
                         {!benKhach && (
                           <span className={`${avatar} w-7 h-7 rounded-full flex-none flex items-center justify-center text-[11px]`} />

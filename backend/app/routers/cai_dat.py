@@ -95,6 +95,8 @@ DANG_KY_CAI_DAT = [
        nhan_lua_chon={"ngan": "Ngắn gọn", "vua": "Vừa phải", "chi_tiet": "Chi tiết"}),
     _k("prompt_bo_sung", "phong_cach", "Hướng dẫn bổ sung cho AI",
        "Đoạn hướng dẫn riêng của quản trị viên được thêm vào prompt hệ thống (ví dụ quy tắc riêng của doanh nghiệp).", "textarea", ""),
+    _k("prompt_tong_quat", "phong_cach", "Prompt tổng quát (toàn văn phần lõi của bot)",
+       "Cơ chế: khi ô này CÓ nội dung, đoạn đó THAY phần lõi mặc định của prompt hệ thống (danh tính bot + xưng hô + hướng dẫn giọng điệu/độ dài + luật chống một motip + khóa danh tính). Các phần dữ liệu động vẫn tự chắp phía sau như cũ: thông tin doanh nghiệp, danh sách dịch vụ PR, hồ sơ khách, ngữ cảnh tri thức/bộ nhớ và Hướng dẫn bổ sung. Khi ĐỂ TRỐNG: dùng phần lõi mặc định của hệ thống như trước. Sửa ở trang 'Prompt tổng quát' để xem trước toàn văn prompt đã ghép. Hiệu lực ngay, không cần khởi động lại.", "textarea", ""),
     _k("so_tin_nhan_ngu_canh", "phong_cach", "Số tin lịch sử truyền cho AI",
        "Số tin gần nhất của hội thoại được truyền làm lịch sử đa lượt để AI nhớ ngữ cảnh, không chào lại/lặp lại.", "so", 10, min=1, max=50),
     # ---- Nhóm: Chế độ trò chuyện tự do ----
@@ -292,6 +294,43 @@ def cap_nhat_cai_dat(data: CaiDatIn, db: Session = Depends(get_db), admin: User 
         _luu_mot_cai_dat(db, khoa, gia_tri)
     db.commit()
     return doc_cai_dat(db)
+
+
+@router.get("/xem-prompt-tong-quat")
+def xem_prompt_tong_quat(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    """Xem trước TOÀN VĂN prompt hệ thống mà bot sẽ ghép khi trả lời khách.
+
+    Ghép bằng đúng hàm tao_cac_phan_prompt của ai_gateway với cài đặt hiện
+    tại. Các phần phụ thuộc dữ liệu thật được nạp thật khi có (dịch vụ đang
+    mở bán); phần phụ thuộc từng khách/từng câu hỏi dùng DỮ LIỆU MẪU ghi rõ
+    [DỮ LIỆU MẪU] để quản trị viên thấy vị trí chúng sẽ xuất hiện.
+    Trả về {cac_phan: [{ten, noi_dung, nguon}], toan_van}.
+    """
+    from ..models import ServiceItem
+    from ..services.ai_gateway import tao_cac_phan_prompt
+    cd = doc_cai_dat(db)
+    # Dịch vụ THẬT đang mở bán (định dạng giống hệt orchestrator khi trả lời)
+    try:
+        so_dv = int(cd.get("so_dich_vu_pr") or 5)
+    except (TypeError, ValueError):
+        so_dv = 5
+    dich_vu = []
+    for s in (db.query(ServiceItem).filter(ServiceItem.is_active == True)
+              .order_by(ServiceItem.id).limit(max(1, so_dv)).all()):
+        gia = (s.price_text or "").strip()
+        if not gia and s.price:
+            gia = f"{s.price:,.0f}".replace(",", ".") + "đ"
+        dich_vu.append({"ten": s.name, "gia": gia, "mo_ta": (s.description or "")[:200]})
+    if not dich_vu:
+        dich_vu = [{"ten": "[DỮ LIỆU MẪU] Dịch vụ mẫu (chưa có dịch vụ thật đang bật)",
+                    "gia": "", "mo_ta": "Khi có dịch vụ thật đang mở bán, danh sách thật sẽ hiện ở đây thay cho dòng mẫu này."}]
+    ho_so_mau = ("[DỮ LIỆU MẪU] Hồ sơ khách mẫu — khi trò chuyện thật, phần này là bản tóm tắt "
+                 "bộ nhớ dài hạn của đúng khách đang nhắn (tên, nhu cầu, sở thích đã nhớ...).")
+    chunks_mau = [{"content": "[DỮ LIỆU MẪU] Đoạn tri thức mẫu — khi trả lời thật, hệ thống truy hồi "
+                              "các đoạn kho tri thức liên quan nhất tới câu hỏi của khách và đặt vào đây."}]
+    ky_uc_mau = ["[DỮ LIỆU MẪU] Ký ức mẫu về khách — khi trả lời thật là các ký ức liên quan đã lưu trong Bộ nhớ AI."]
+    cac_phan = tao_cac_phan_prompt(cd, chunks_mau, ky_uc_mau, dich_vu=dich_vu, ho_so_khach=ho_so_mau)
+    return {"cac_phan": cac_phan, "toan_van": "\n".join(p["noi_dung"] for p in cac_phan)}
 
 
 class KhoiPhucIn(BaseModel):
