@@ -187,6 +187,8 @@ DANG_KY_CAI_DAT = [
        "Tên gọi tắt mọi người hay dùng (vd 'Hoa' trong 'Quỳnh Hoa'). Nhắc đúng tên này trong ngữ cảnh đang gọi bot thì bot cũng trả lời, không cần tag.", "text", "Hoa"),
     _k("nhom_rep_khi_nhac_ten", "nhom_gui_tin", "Trả lời khi được nhắc tên trong nhóm",
        "Bật: trong nhóm, ai nhắc tên bot (tên đầy đủ hoặc tên gọi ngắn) đúng ngữ cảnh đang gọi bot thì bot trả lời dù không tag. Nhắc tới hoa/người khác trùng tên sẽ bị bỏ qua; câu lưng chừng chỉ rep khi bot vừa nói trong nhóm đó.", "bool", True),
+    _k("nhom_ai_doan_y_dinh", "nhom_gui_tin", "AI tự phán ý định gọi bot trong nhóm",
+       "Bật: tin nhóm không tag/không nhắc tên nhưng có dấu hiệu đang nói với bot (gọi em/e/nó/bot, trả lời tiếp câu bot vừa nói...) sẽ được AI phán theo mạch trò chuyện — đúng là gọi bot thì bot trả lời. Mỗi lần phán tốn 1 lần gọi AI rất ngắn; tin không có dấu hiệu thì không phán.", "bool", True),
     _k("ten_bot_trong_nhom", "nhom_gui_tin", "Tên bot trong nhóm",
        "Tên hiển thị của bot trong nhóm — tin nhóm chứa tên này cũng được coi là gọi bot. Để trống = chỉ tính mention UID.", "text", ""),
     _k("danh_sach_nhom_duoc_phep", "nhom_gui_tin", "Danh sách nhóm được phép (ID nhóm, phân cách dấu phẩy)",

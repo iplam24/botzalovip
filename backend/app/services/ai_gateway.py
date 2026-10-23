@@ -391,6 +391,58 @@ def get_default_provider(db: Session):
             or q.filter(AIProviderConfig.provider != "mock").order_by(AIProviderConfig.id).first()
             or q.order_by(AIProviderConfig.id).first())
 
+def doan_co_phai_goi_bot(db: Session, provider, ten_bot: str, lich_su: list, nguoi_gui: str, content: str) -> bool:
+    """AI phán Ý ĐỊNH cho tin nhóm không tag/không nhắc tên rõ ràng: tin có
+    phải đang NÓI VỚI bot không (gọi bằng em/e/nó/bot/ả, trả lời tiếp câu
+    bot vừa nói, hỏi mà mạch trò chuyện cho thấy hỏi bot...).
+
+    1 lần gọi model siêu ngắn (temperature 0, trả lời CO/KHONG), có ghi
+    AIUsage như mọi lượt gọi. Provider Mock/thiếu cấu hình/mọi lỗi -> False
+    (im lặng như luật cứng, không bao giờ để bộ lọc làm sập pipeline)."""
+    if not provider or provider.provider == "mock":
+        return False
+    try:
+        from .text_utils import normalize_vi
+        key = decrypt_secret(provider.api_key_encrypted)
+        if not key or not provider.base_url:
+            return False
+        ten = (ten_bot or "").strip() or "Quỳnh Hoa"
+        system = (
+            f"Bạn là bộ lọc cho bot Zalo tên '{ten}' (nữ, mọi người hay gọi là Hoa, em, e) trong một nhóm chat nhiều người.\n"
+            "Nhiệm vụ: xét tin nhắn MỚI nhất — người gửi có đang NÓI VỚI / gọi / chờ "
+            f"'{ten}' trả lời không? Tính là CÓ khi: gọi bot bằng em/e/nó/bot/ả; đang trả lời "
+            "tiếp câu bot vừa nói; hỏi một câu mà mạch trò chuyện cho thấy hỏi bot; cà khịa nhắm vào bot.\n"
+            "KHÔNG khi: nói với một người khác cụ thể, tán gẫu chung không hướng tới bot, "
+            "hoặc nhắc tới bot ở ngôi thứ ba mà không chờ bot trả lời.\n"
+            "Chỉ trả lời đúng một từ: CO hoặc KHONG."
+        )
+        dong = [f"{m.get('ten') or 'Ai đó'}: {m.get('content') or ''}"
+                for m in (lich_su or []) if isinstance(m, dict)]
+        user = ("Các tin gần nhất trong nhóm:\n" + ("\n".join(dong) if dong else "(chưa có)")
+                + f"\n\nTin mới từ {nguoi_gui or 'Ai đó'}: {content}\n"
+                + f"Tin này có đang nói với {ten} không? Trả lời CO hoặc KHONG.")
+        payload = {"model": provider.model, "stream": False, "temperature": 0, "max_tokens": 8,
+                   "messages": [{"role": "system", "content": system},
+                                {"role": "user", "content": user}]}
+        with http_client(timeout=min(provider.timeout or 20, 20)) as client:
+            r = client.post(f"{provider.base_url.rstrip('/')}/chat/completions",
+                            headers={"Authorization": f"Bearer {key}"}, json=payload)
+            if r.status_code >= 400:
+                return False
+            parsed = parse_chat_response(r.text, r.headers.get("content-type", "") if hasattr(r, "headers") else "")
+        usage = parsed.get("usage") or {}
+        try:
+            db.add(AIUsage(provider_id=provider.id, model=parsed.get("model") or provider.model,
+                           prompt_tokens=usage.get("prompt_tokens", 0) or 0,
+                           completion_tokens=usage.get("completion_tokens", 0) or 0, status="thanh_cong"))
+            db.commit()
+        except Exception:
+            db.rollback()
+        return normalize_vi(parsed.get("content") or "").strip().startswith("co")
+    except Exception:
+        return False
+
+
 CHI_DAN_LUAT_NHOM = (
     "Đây là tin trong NHÓM nhiều người. Nếu tin nhắn tag bạn chỉ là chửi thề, xúc phạm, "
     "trêu chọc/bả vô nghĩa, spam, hoặc không có nội dung nào để trả lời, hãy trả về ĐÚNG "

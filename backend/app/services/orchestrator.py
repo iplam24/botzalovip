@@ -156,6 +156,40 @@ def _nhac_ten_bot(content: str, cai_dat: dict, bot_vua_noi: bool = False) -> boo
     return co_lung_chung and bool(bot_vua_noi)
 
 
+def _goi_xung_ho_bot(content: str, bot_vua_noi: bool) -> bool:
+    """Gọi bot bằng XƯNG HÔ 'em/e' ('em ơi rep a cái', 'e đâu rồi', 'rep đi
+    em') — kiểu gọi phổ biến nhất với bot nữ. CHỈ tính khi bot vừa nói
+    trong chính nhóm này (đang trong mạch trò chuyện với bot), tránh nhảy
+    vào khi người ta gọi một 'em' khác lúc bot không tham gia."""
+    if not bot_vua_noi:
+        return False
+    toks = _tokens_giu_dau(content)
+    for i, t in enumerate(toks):
+        if t not in ("em", "e"):
+            continue
+        sau = toks[i + 1] if i + 1 < len(toks) else ""
+        truoc = toks[i - 1] if i > 0 else ""
+        if sau in _HOA_SAU_LA_GOI_BOT or truoc in ("ơi", "oi"):
+            return True
+    if len(toks) >= 2 and toks[-1] in ("em", "e"):
+        return True
+    return False
+
+
+# Dấu hiệu một tin nhóm CÓ THỂ đang hướng tới bot — chỉ các tin này mới
+# được đem cho AI phán ý định (tiết kiệm chi phí gọi AI).
+_DAU_HIEU_DOAN = {"e", "em", "nó", "no", "bot", "máy", "may", "ả", "mày",
+                  "ơi", "oi", "sao", "gì", "gi", "đâu", "dau", "không", "ko",
+                  "chưa", "hả", "ha", "nhỉ", "nhi", "thế", "vậy", "hông",
+                  "hong", "chị", "chi", "bạn", "ban"}
+
+
+def _la_ung_vien_doan_y_dinh(content: str) -> bool:
+    if "?" in (content or ""):
+        return True
+    return bool(set(normalize_vi(content or "").split()) & _DAU_HIEU_DOAN)
+
+
 def _duoc_tra_loi_trong_nhom(cai_dat: dict, content: str, mentions, bot_uid: str, thread_id: str, bot_vua_noi: bool = False) -> bool:
     """Mục 7: trong nhóm, bot chỉ trả lời khi được gọi ĐÍCH DANH.
 
@@ -179,6 +213,8 @@ def _duoc_tra_loi_trong_nhom(cai_dat: dict, content: str, mentions, bot_uid: str
     if bot_uid and str(bot_uid) in uids:
         return True
     if _nhac_ten_bot(content, cai_dat, bot_vua_noi=bot_vua_noi):
+        return True
+    if _goi_xung_ho_bot(content, bot_vua_noi):
         return True
     return False
 
@@ -371,6 +407,7 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
         # ngữ cảnh cho cổng nhắc tên: câu lưng chừng chỉ tính là gọi bot
         # khi bot đang tham gia cuộc trò chuyện đó.
         bot_vua_noi = False
+        so_tin_sau_bot = 99
         try:
             from datetime import timedelta as _td
             tin_bot_cuoi = (db.query(Message).filter(
@@ -381,9 +418,34 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
                 if moc.tzinfo is None:
                     moc = moc.replace(tzinfo=timezone.utc)
                 bot_vua_noi = (datetime.now(timezone.utc) - moc) < _td(minutes=10)
+                so_tin_sau_bot = db.query(Message).filter(
+                    Message.conversation_id == conv.id, Message.sender_type == "khach",
+                    Message.id > tin_bot_cuoi.id).count()
         except Exception:
             bot_vua_noi = False
-        if not _duoc_tra_loi_trong_nhom(cai_dat, content, mentions, uid_bot, str(customer_external_id), bot_vua_noi=bot_vua_noi):
+        duoc = _duoc_tra_loi_trong_nhom(cai_dat, content, mentions, uid_bot, str(customer_external_id), bot_vua_noi=bot_vua_noi)
+        if not duoc and cai_dat.get("nhom_ai_doan_y_dinh", True) and (
+                _la_ung_vien_doan_y_dinh(content) or (bot_vua_noi and so_tin_sau_bot <= 3)):
+            # Lớp THÔNG MINH: luật cứng không bắt được nhưng tin có dấu hiệu
+            # hướng tới bot -> AI phán ý định theo mạch trò chuyện (8 tin
+            # gần nhất có tên người nói). Lỗi/Mock -> giữ im lặng như cũ.
+            try:
+                _pvd = ai_gateway.get_default_provider(db)
+                if _pvd and _pvd.provider != "mock":
+                    _ten_bot = str(cai_dat.get("ten_bot_trong_nhom") or "Quỳnh Hoa")
+                    _gan = (db.query(Message).filter(Message.conversation_id == conv.id)
+                            .order_by(Message.id.desc()).limit(9).all())
+                    _dong = [{"ten": f"{_ten_bot} (bot)" if m.sender_type != "khach"
+                              else (getattr(m, "sender_name", "") or "Ai đó"),
+                              "content": m.content}
+                             for m in reversed(_gan) if m.external_id != external_id]
+                    if ai_gateway.doan_co_phai_goi_bot(db, _pvd, _ten_bot, _dong, customer_name, content):
+                        duoc = True
+                        db.add(SystemLog(level="info", module="cong_y_dinh",
+                                         message=f"ai_doan_goi_bot conv={conv.id}", trace_id=trace)); db.commit()
+            except Exception:
+                pass
+        if not duoc:
             db.add(SystemLog(level="info", module="orchestrator",
                              message=f"bo_qua_nhom_khong_tag thread={customer_external_id} conv={conv.id}",
                              trace_id=trace)); db.commit()

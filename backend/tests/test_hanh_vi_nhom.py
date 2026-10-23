@@ -27,7 +27,7 @@ _KHOA_DUNG = ("che_do_tro_chuyen_tu_do", "che_do_toc_do_tra_loi", "bot_gui_stick
               "thu_thap_tu_khoa_hoi_sdt", "tin_chao_khach_moi",
               "bo_nho_tom_tat_sau_bao_nhieu_tin", "module_thu_thap_thong_tin",
               "nhom_chong_rep_vo_van", "ten_bot_trong_nhom", "ten_goi_ngan_bot",
-              "nhom_rep_khi_nhac_ten")
+              "nhom_rep_khi_nhac_ten", "nhom_ai_doan_y_dinh")
 
 BOT_UID = "bot-uid-hv"
 
@@ -260,6 +260,80 @@ def test_117_e2e_nhac_ten_khong_tag_van_rep_con_hoa_thi_khong(monkeypatch):
         j2 = r2.json()
         assert j2["tra_loi"] is None and j2["ly_do"] == "bo_qua_nhom_khong_tag", j2
         assert len(_cac_lan_gui(ghi)) == len(gui), ghi
+    finally:
+        _phuc_hoi(chup)
+
+
+def test_118_goi_em_e_theo_mach_va_ung_vien_doan():
+    from app.services.orchestrator import _duoc_tra_loi_trong_nhom, _la_ung_vien_doan_y_dinh
+    cd = {"bot_nhom_chi_khi_duoc_tag": True, "danh_sach_nhom_bi_chan": "",
+          "ten_bot_trong_nhom": "Quỳnh Hoa", "ten_goi_ngan_bot": "Hoa",
+          "nhom_rep_khi_nhac_ten": True}
+    # Bot vừa nói trong nhóm -> gọi em/e là gọi bot
+    assert _duoc_tra_loi_trong_nhom(cd, "em ơi rep a cái", [], BOT_UID, "n", bot_vua_noi=True) is True
+    assert _duoc_tra_loi_trong_nhom(cd, "e đâu rồi", [], BOT_UID, "n", bot_vua_noi=True) is True
+    assert _duoc_tra_loi_trong_nhom(cd, "rep a đi em", [], BOT_UID, "n", bot_vua_noi=True) is True
+    # Bot chưa từng nói trong nhóm -> gọi em/e KHÔNG tính (tránh nhảy vào chuyện người khác)
+    assert _duoc_tra_loi_trong_nhom(cd, "em ơi rep a cái", [], BOT_UID, "n", bot_vua_noi=False) is False
+    # 'em' không kèm mẫu gọi -> không tính dù bot vừa nói
+    assert _duoc_tra_loi_trong_nhom(cd, "em gái mưa này xinh thật", [], BOT_UID, "n", bot_vua_noi=True) is False
+    # Ứng viên đem cho AI phán ý định
+    assert _la_ung_vien_doan_y_dinh("nó im re luôn kìa") is True
+    assert _la_ung_vien_doan_y_dinh("tối nay ăn gì") is True
+    assert _la_ung_vien_doan_y_dinh("ok mai gặp ở quán cũ") is False
+
+
+def test_119_e2e_ai_doan_y_dinh_goi_bot(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import ai_gateway as _ag
+    _lap_fake(monkeypatch, ghi := [])
+    _lap_ai_kich_ban(monkeypatch, ["Rep theo phán đoán ý định nè"])
+    goi = {"so_lan": 0, "ket_qua": True}
+
+    def _doan_gia(db, provider, ten_bot, lich_su, nguoi_gui, content):
+        goi["so_lan"] += 1
+        return goi["ket_qua"]
+
+    monkeypatch.setattr(_ag, "doan_co_phai_goi_bot", _doan_gia)
+    monkeypatch.setattr(_ag, "get_default_provider",
+                        lambda db: SimpleNamespace(provider="openai_compatible"))
+    chup = _chup_cai_dat(); _cai_dat_nen()
+    _dat_cai_dat(ten_bot_trong_nhom="Quỳnh Hoa", nhom_ai_doan_y_dinh=True)
+    try:
+        # Không tag, không tên — AI phán là gọi bot -> rep
+        r = _gui_nhom("hv-doan-1", "nhom-hv-doan", "Huy", "nó im re luôn kìa", tag=False)
+        j = r.json()
+        assert r.status_code == 200, r.text
+        assert j["tra_loi"] and "phán đoán" in j["tra_loi"], j
+        assert goi["so_lan"] >= 1
+        # AI phán KHÔNG -> im lặng
+        goi["ket_qua"] = False
+        r2 = _gui_nhom("hv-doan-2", "nhom-hv-doan", "Lan", "nó rep nhanh ghê ha", tag=False)
+        j2 = r2.json()
+        assert j2["tra_loi"] is None and j2["ly_do"] == "bo_qua_nhom_khong_tag", j2
+        # Tắt công tắc phán -> không gọi AI phán nữa, im lặng luôn
+        _dat_cai_dat(nhom_ai_doan_y_dinh=False)
+        goi["ket_qua"] = True; so_truoc = goi["so_lan"]
+        r3 = _gui_nhom("hv-doan-3", "nhom-hv-doan", "Huy", "nó đâu rồi ta", tag=False)
+        assert r3.json()["tra_loi"] is None
+        assert goi["so_lan"] == so_truoc
+    finally:
+        _phuc_hoi(chup)
+
+
+def test_120_e2e_goi_em_khi_bot_vua_noi(monkeypatch):
+    _lap_fake(monkeypatch, ghi := [])
+    _lap_ai_kich_ban(monkeypatch, ["Câu một nè", "Câu hai rep em nè"])
+    chup = _chup_cai_dat(); _cai_dat_nen()
+    _dat_cai_dat(ten_bot_trong_nhom="Quỳnh Hoa", nhom_ai_doan_y_dinh=False)
+    try:
+        r = _gui_nhom("hv-em-1", "nhom-hv-em", "Huy", "@Quỳnh Hoa alo", tag=True)
+        assert r.json()["tra_loi"], r.text
+        # Không tag, không tên — chỉ gọi "em ơi" ngay sau khi bot vừa nói -> rep
+        # (nhom_ai_doan_y_dinh=False nên chắc chắn là đường luật xưng hô bắt được)
+        r2 = _gui_nhom("hv-em-2", "nhom-hv-em", "Lan", "em ơi rep a cái này", tag=False)
+        j2 = r2.json()
+        assert j2["tra_loi"] and "Câu hai" in j2["tra_loi"], j2
     finally:
         _phuc_hoi(chup)
 
