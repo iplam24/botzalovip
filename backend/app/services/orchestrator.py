@@ -87,15 +87,85 @@ def _tach_danh_sach(tho: str):
     return [p.strip() for p in str(tho).replace("\n", ",").split(",") if p.strip()]
 
 
-def _duoc_tra_loi_trong_nhom(cai_dat: dict, content: str, mentions, bot_uid: str, thread_id: str) -> bool:
-    """Mục 7: trong nhóm, bot chỉ trả lời khi được tag ĐÍCH DANH.
+def _tokens_giu_dau(s: str) -> list:
+    """Tách từ GIỮ NGUYÊN dấu tiếng Việt (thường hoá + bỏ dấu câu) — dùng
+    cho tên gọi ngắn: 'hoa' (tên bot) phải phân biệt được với 'hoà/hoả'."""
+    s = (s or "").lower()
+    s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+    return [t for t in s.split() if t]
+
+
+# "hoa" đứng cạnh các từ này = đang nói về HOA (cây hoa) hoặc một người khác
+# trùng tên, không phải đang gọi bot.
+_HOA_SAU_KHONG_PHAI_BOT = {"hồng", "cúc", "mai", "lan", "đào", "sen", "huệ",
+                           "quả", "mắt", "tay", "giấy", "đẹp", "tươi", "nở",
+                           "thơm", "giả", "khô", "cưới", "viên", "đồng"}
+_HOA_TRUOC_KHONG_PHAI_BOT = {"mua", "bán", "cắm", "trồng", "hái", "ngắm",
+                             "anh", "ông", "thằng", "chú", "bác", "nhà"}
+# Từ đi ngay sau tên gọi ngắn cho thấy đang NÓI VỚI bot (lời gọi/câu hỏi).
+_HOA_SAU_LA_GOI_BOT = {"ơi", "oi", "đâu", "sao", "gì", "rep", "trả", "nói",
+                       "xem", "coi", "làm", "giúp", "kể", "hát", "nhảy",
+                       "đây", "rồi", "chưa", "không", "ko", "hả", "à", "á",
+                       "nè", "nhỉ", "thế", "vậy", "đi", "onl", "online"}
+_TU_DEM_GOI = {"ê", "ơi", "oi", "nè", "này", "alo", "hey", "hê"}
+
+
+def _nhac_ten_bot(content: str, cai_dat: dict, bot_vua_noi: bool = False) -> bool:
+    """Tin có đang NHẮC/GỌI bot theo tên (thay cho tag UID) không.
+
+    - Tên đầy đủ (ten_bot_trong_nhom): khớp CỤM token đã bỏ dấu —
+      'Quỳnh Hoa'/'quynh hoa' đủ đặc thù, coi như đang gọi bot.
+    - Tên gọi ngắn (ten_goi_ngan_bot, mặc định suy ra từ tên đầy đủ): khớp
+      token GIỮ DẤU ('hoa' khác 'hoà/hoả') + xét NGỮ CẢNH theo yêu cầu của
+      chủ hệ thống: cạnh từ về hoa/người khác thì bỏ qua; mẫu câu gọi/hỏi
+      thì tính là gọi; câu lưng chừng chỉ tính khi bot VỪA tham gia chính
+      cuộc trò chuyện này (bot_vua_noi) — đúng ngữ cảnh của bot.
+    """
+    raw = content or ""
+    ten_day = str(cai_dat.get("ten_bot_trong_nhom") or "").strip()
+    if ten_day:
+        tk_day = normalize_vi(ten_day).split()
+        tk_nd = normalize_vi(raw).split()
+        if tk_day and len(tk_day) <= len(tk_nd) and any(
+                tk_nd[i:i + len(tk_day)] == tk_day
+                for i in range(len(tk_nd) - len(tk_day) + 1)):
+            return True
+    if not cai_dat.get("nhom_rep_khi_nhac_ten", True):
+        return False
+    ten_ngan = str(cai_dat.get("ten_goi_ngan_bot") or "").strip().lower()
+    if not ten_ngan and ten_day:
+        ten_ngan = normalize_vi(ten_day).split()[-1]
+    if not ten_ngan:
+        return False
+    toks = _tokens_giu_dau(raw)
+    if ten_ngan not in toks:
+        return False
+    if ("@" + ten_ngan) in raw.lower():
+        return True
+    co_lung_chung = False
+    for i, t in enumerate(toks):
+        if t != ten_ngan:
+            continue
+        truoc = toks[i - 1] if i > 0 else ""
+        sau = toks[i + 1] if i + 1 < len(toks) else ""
+        if sau in _HOA_SAU_KHONG_PHAI_BOT or truoc in _HOA_TRUOC_KHONG_PHAI_BOT:
+            continue  # lần nhắc này là về hoa/người khác
+        if sau in _HOA_SAU_LA_GOI_BOT or i == 0 or (i == 1 and truoc in _TU_DEM_GOI):
+            return True
+        co_lung_chung = True
+    return co_lung_chung and bool(bot_vua_noi)
+
+
+def _duoc_tra_loi_trong_nhom(cai_dat: dict, content: str, mentions, bot_uid: str, thread_id: str, bot_vua_noi: bool = False) -> bool:
+    """Mục 7: trong nhóm, bot chỉ trả lời khi được gọi ĐÍCH DANH.
 
     - Mention chứa đúng UID của tài khoản bot (bot_uid) -> được trả lời.
     - Mention @all (uid "-1") KHÔNG tính là tag bot.
-    - Hoặc nội dung chứa tên bot đã cấu hình (ten_bot_trong_nhom).
-    - Chủ hệ thống chốt (đợt D): tag đúng là trả lời ở MỌI nhóm — cổng
+    - Hoặc tin NHẮC TÊN bot đúng ngữ cảnh (xem _nhac_ten_bot): tên đầy đủ,
+      hoặc tên gọi ngắn trong câu gọi/hỏi bot.
+    - Chủ hệ thống chốt (đợt D): gọi đúng là trả lời ở MỌI nhóm — cổng
       danh_sach_nhom_duoc_phep đã BỎ. Ngược lại, nhóm nằm trong
-      danh_sach_nhom_bi_chan thì không trả lời kể cả khi tag đúng.
+      danh_sach_nhom_bi_chan thì không trả lời kể cả khi gọi đúng.
     """
     chan = _tach_danh_sach(cai_dat.get("danh_sach_nhom_bi_chan"))
     if chan and str(thread_id) in chan:
@@ -108,8 +178,7 @@ def _duoc_tra_loi_trong_nhom(cai_dat: dict, content: str, mentions, bot_uid: str
             uids.add(str(m["uid"]))
     if bot_uid and str(bot_uid) in uids:
         return True
-    ten_bot = str(cai_dat.get("ten_bot_trong_nhom") or "").strip()
-    if ten_bot and normalize_vi(ten_bot) in normalize_vi(content or ""):
+    if _nhac_ten_bot(content, cai_dat, bot_vua_noi=bot_vua_noi):
         return True
     return False
 
@@ -298,7 +367,23 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
                 uid_bot = str(ZaloPersonalConnector().status().get("tai_khoan_id") or "")
             except Exception:
                 uid_bot = ""
-        if not _duoc_tra_loi_trong_nhom(cai_dat, content, mentions, uid_bot, str(customer_external_id)):
+        # Bot có VỪA nói trong chính nhóm này không (<=10 phút)? Tín hiệu
+        # ngữ cảnh cho cổng nhắc tên: câu lưng chừng chỉ tính là gọi bot
+        # khi bot đang tham gia cuộc trò chuyện đó.
+        bot_vua_noi = False
+        try:
+            from datetime import timedelta as _td
+            tin_bot_cuoi = (db.query(Message).filter(
+                Message.conversation_id == conv.id, Message.sender_type != "khach")
+                .order_by(Message.id.desc()).first())
+            if tin_bot_cuoi and tin_bot_cuoi.created_at:
+                moc = tin_bot_cuoi.created_at
+                if moc.tzinfo is None:
+                    moc = moc.replace(tzinfo=timezone.utc)
+                bot_vua_noi = (datetime.now(timezone.utc) - moc) < _td(minutes=10)
+        except Exception:
+            bot_vua_noi = False
+        if not _duoc_tra_loi_trong_nhom(cai_dat, content, mentions, uid_bot, str(customer_external_id), bot_vua_noi=bot_vua_noi):
             db.add(SystemLog(level="info", module="orchestrator",
                              message=f"bo_qua_nhom_khong_tag thread={customer_external_id} conv={conv.id}",
                              trace_id=trace)); db.commit()

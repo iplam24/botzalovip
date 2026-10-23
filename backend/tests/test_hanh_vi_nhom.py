@@ -26,7 +26,8 @@ _KHOA_DUNG = ("che_do_tro_chuyen_tu_do", "che_do_toc_do_tra_loi", "bot_gui_stick
               "bot_tu_nhan_them", "thu_thap_tu_hoi_sdt", "thu_thap_intent_hoi_sdt",
               "thu_thap_tu_khoa_hoi_sdt", "tin_chao_khach_moi",
               "bo_nho_tom_tat_sau_bao_nhieu_tin", "module_thu_thap_thong_tin",
-              "nhom_chong_rep_vo_van")
+              "nhom_chong_rep_vo_van", "ten_bot_trong_nhom", "ten_goi_ngan_bot",
+              "nhom_rep_khi_nhac_ten")
 
 BOT_UID = "bot-uid-hv"
 
@@ -201,6 +202,64 @@ def test_100_f1_chat_1_1_khong_ap_chot_bo_qua(monkeypatch):
         assert bat["kwargs"].get("luat_nhom") is False
         gui = _cac_lan_gui(ghi)
         assert gui and gui[0][3] == 0, gui
+    finally:
+        _phuc_hoi(chup)
+
+
+# ================= Nhắc tên bot trong nhóm (theo ngữ cảnh) =================
+
+def _cong_ten(content, vua_noi=False, **ghi_de):
+    from app.services.orchestrator import _duoc_tra_loi_trong_nhom
+    cd = {"bot_nhom_chi_khi_duoc_tag": True, "danh_sach_nhom_bi_chan": "",
+          "ten_bot_trong_nhom": "Quỳnh Hoa", "ten_goi_ngan_bot": "Hoa",
+          "nhom_rep_khi_nhac_ten": True}
+    cd.update(ghi_de)
+    return _duoc_tra_loi_trong_nhom(cd, content, [], BOT_UID, "nhom-x", bot_vua_noi=vua_noi)
+
+
+def test_116_cong_nhac_ten_theo_ngu_canh():
+    # Tên đầy đủ — có dấu hay không dấu đều là gọi bot
+    assert _cong_ten("Quỳnh Hoa ơi cho hỏi cái này") is True
+    assert _cong_ten("quynh hoa dau roi nhi") is True
+    # Tên ngắn trong mẫu câu gọi/hỏi -> gọi bot
+    assert _cong_ten("Hoa ơi rep đi") is True
+    assert _cong_ten("hoa oi sao im the") is True
+    assert _cong_ten("Hoa sao m im thế") is True
+    assert _cong_ten("ê Hoa, xem này") is True
+    # Ngữ cảnh KHÔNG phải bot: hoa (cây hoa) / người khác trùng tên / chữ gần giống
+    assert _cong_ten("hoa hồng đẹp ghê") is False
+    assert _cong_ten("mua hoa về cắm nè mọi người") is False
+    assert _cong_ten("anh Hoa hôm qua onl chưa") is False
+    assert _cong_ten("hỏa lực team mình mạnh vãi") is False
+    assert _cong_ten("hòa nhau rồi nhé") is False
+    # Câu lưng chừng: chỉ tính là gọi khi bot VỪA nói trong chính nhóm này
+    assert _cong_ten("con hoa này láo thật") is False
+    assert _cong_ten("con hoa này láo thật", vua_noi=True) is True
+    # Tắt tính năng nhắc tên ngắn: tên ngắn không còn tác dụng, tên đầy đủ vẫn tính
+    assert _cong_ten("Hoa ơi rep đi", nhom_rep_khi_nhac_ten=False) is False
+    assert _cong_ten("Quỳnh Hoa ơi rep đi", nhom_rep_khi_nhac_ten=False) is True
+
+
+def test_117_e2e_nhac_ten_khong_tag_van_rep_con_hoa_thi_khong(monkeypatch):
+    _lap_fake(monkeypatch, ghi := [])
+    _lap_ai_kich_ban(monkeypatch, ["Tối nay nhóm mình quẩy game nhé mọi người"])
+    chup = _chup_cai_dat(); _cai_dat_nen()
+    _dat_cai_dat(ten_bot_trong_nhom="Quỳnh Hoa", ten_goi_ngan_bot="Hoa",
+                 nhom_rep_khi_nhac_ten=True)
+    try:
+        r = _gui_nhom("hv-ten-1", "nhom-hv-ten", "Huy",
+                      "Quỳnh Hoa ơi, nhóm mình tối nay có gì vui không", tag=False)
+        j = r.json()
+        assert r.status_code == 200, r.text
+        assert j["tra_loi"] and "quẩy game" in j["tra_loi"], j
+        gui = _cac_lan_gui(ghi)
+        assert gui and all(g[3] == 1 for g in gui), gui
+        # Nói về hoa (cây hoa) — không phải gọi bot -> im lặng dù bot vừa nói
+        r2 = _gui_nhom("hv-ten-2", "nhom-hv-ten", "Lan",
+                       "hoa hồng hôm nay đẹp quá mọi người", tag=False)
+        j2 = r2.json()
+        assert j2["tra_loi"] is None and j2["ly_do"] == "bo_qua_nhom_khong_tag", j2
+        assert len(_cac_lan_gui(ghi)) == len(gui), ghi
     finally:
         _phuc_hoi(chup)
 
