@@ -378,7 +378,15 @@ def parse_chat_response(raw_text: str, content_type: str = ""):
 def get_default_provider(db: Session):
     return db.query(AIProviderConfig).filter(AIProviderConfig.is_default == True, AIProviderConfig.is_active == True).first() or db.query(AIProviderConfig).filter(AIProviderConfig.is_active == True).first()
 
-def generate_reply(db: Session, provider: AIProviderConfig, question: str, context_chunks: list, memories: list, goi_y_hoi_sdt: bool = False, lich_su: list = None, cai_dat: dict = None, dich_vu: list = None, ho_so_khach: str = "", anh_data_uri: str = ""):
+CHI_DAN_LUAT_NHOM = (
+    "Đây là tin trong NHÓM nhiều người. Nếu tin nhắn tag bạn chỉ là chửi thề, xúc phạm, "
+    "trêu chọc/bả vô nghĩa, spam, hoặc không có nội dung nào để trả lời, hãy trả về ĐÚNG "
+    "chuỗi [BO_QUA] và không gì khác. Tin có câu hỏi/nội dung trò chuyện bình thường "
+    "(kể cả đùa vui có nội dung) thì trả lời bình thường."
+)
+
+
+def generate_reply(db: Session, provider: AIProviderConfig, question: str, context_chunks: list, memories: list, goi_y_hoi_sdt: bool = False, lich_su: list = None, cai_dat: dict = None, dich_vu: list = None, ho_so_khach: str = "", anh_data_uri: str = "", luat_nhom: bool = False, chi_dan_bo_sung: str = ""):
     """Sinh câu trả lời. Mục 10 (chống một motip):
     - lich_su: các tin gần nhất của hội thoại [{role: user|assistant, content}]
       được truyền thành messages đa lượt đúng thứ tự (model nhớ ngữ cảnh,
@@ -417,6 +425,16 @@ def generate_reply(db: Session, provider: AIProviderConfig, question: str, conte
             # Khách chưa có SĐT: gợi ý model kết thúc bằng câu hỏi xin số điện thoại tự nhiên
             cau_hoi = str(cd.get("thu_thap_cau_hoi_sdt") or "Anh/chị cho em xin số điện thoại để tư vấn viên liên hệ tư vấn chi tiết hơn ạ.")
             noi_dung_hoi += f"\n(Khách chưa cung cấp số điện thoại. Hãy kết thúc câu trả lời bằng một câu hỏi xin số điện thoại thật tự nhiên, gần với câu mẫu: \"{cau_hoi}\")"
+        if luat_nhom:
+            # Đợt Hành vi nhóm (F1): chốt chống rep vớ vẩn trong NHÓM — áp cho
+            # CẢ hai chế độ (tư vấn + tự do; persona tự do "rep tất cả" chỉ áp
+            # cho chat 1-1). Model tự phán đoán: tin tag chỉ để chửi/bả/spam
+            # thì trả đúng [BO_QUA], orchestrator thấy token này sẽ im lặng.
+            noi_dung_hoi += f"\n({CHI_DAN_LUAT_NHOM})"
+        if chi_dan_bo_sung:
+            # Chỉ dẫn tình huống của orchestrator (vd bộ lọc chống lặp câu F3
+            # yêu cầu diễn đạt lại khác hẳn khi sinh lại lần 2).
+            noi_dung_hoi += f"\n({chi_dan_bo_sung})"
         if anh_data_uri:
             # Lượt hiện tại dạng multimodal theo chuẩn OpenAI-compatible:
             # content là mảng [text, image_url(data URI base64)]

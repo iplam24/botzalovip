@@ -30,9 +30,11 @@
   thuc_hien_tin_nhan_them() kiểm tra lại các điều kiện hủy (tiếp quản,
   khách đã nhắn tiếp, nhân viên đã nhắn, đã có tin thêm) rồi mới gửi.
 """
+import difflib
 import json
 import os
 import random
+import re
 import threading
 import time
 import uuid
@@ -155,6 +157,74 @@ def _gan_admin_tu_ban_be(db: Session, cust: Customer, conv: Conversation, custom
             pass
 
 
+# =====================================================================
+# PHẦN F3 — BỘ LỌC CHỐNG LẶP CÂU (xác thực/deterministic)
+#
+# Bằng chứng thật: AI (đặc biệt chế độ tự do) rơi vào "rãnh câu cửa miệng"
+# và lặp NGUYÊN VĂN cùng vài câu banter ở mọi hội thoại (kể cả tự bắt
+# chước câu cũ của chính nó trong lịch sử). Bộ lọc này không trông chờ AI
+# tự giác: so câu sắp gửi với các câu bot ĐÃ GỬI gần đây TRÊN TOÀN HỆ
+# THỐNG (mọi hội thoại kênh cá nhân) — trùng/gần trùng thì sinh lại 1 lần
+# với chỉ dẫn diễn đạt khác hẳn; vẫn trùng thì nhóm -> im lặng, 1-1 -> vẫn
+# gửi kèm log cảnh báo. Chỉ áp cho reply AI sinh qua provider THẬT (kênh
+# ca_nhan) — câu mẫu cứng (ngoài giờ, hỏi SĐT...) và provider Mock không áp.
+# =====================================================================
+_DAU_CAU_CUOI = " .,!?…~\"'”’"
+
+
+def _chuan_hoa_cau(text) -> str:
+    """Chuẩn hoá một câu để so trùng: lowercase, gộp khoảng trắng, bỏ dấu
+    câu ở cuối, cắt ngắn. Hai câu chỉ khác dấu câu cuối/viết hoa vẫn tính
+    là một."""
+    s = str(text or "").strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    s = s.strip()
+    while s and s[-1] in _DAU_CAU_CUOI:
+        s = s[:-1].rstrip()
+    return s[:200]
+
+
+def _cac_cau_bot_gan_day(db: Session, gioi_han: int = 20):
+    """Các câu bot đã gửi gần nhất trên toàn hệ thống (chỉ hội thoại kênh
+    cá nhân, chỉ tin VĂN BẢN đã gửi thành công) — đã chuẩn hoá, tối đa
+    `gioi_han` câu. Quét dư một ít để bù các tin sticker/không phải chữ."""
+    try:
+        rows = (db.query(Message)
+                .join(Conversation, Message.conversation_id == Conversation.id)
+                .filter(Conversation.channel == "ca_nhan",
+                        Message.sender_type == "bot",
+                        Message.status == "da_gui")
+                .order_by(Message.id.desc()).limit(100).all())
+    except Exception:
+        return []
+    ket_qua = []
+    for m in rows:
+        if getattr(m, "attachment_type", "") == "sticker":
+            continue
+        if (m.content or "").strip() == "[sticker]":
+            continue
+        cau = _chuan_hoa_cau(m.content)
+        if cau:
+            ket_qua.append(cau)
+        if len(ket_qua) >= gioi_han:
+            break
+    return ket_qua
+
+
+def _tim_cau_trung(cau_chuan: str, cac_cau_gan):
+    """Trả về câu gần đây bị trùng (bằng nhau sau chuẩn hoá, hoặc gần
+    trùng với ratio >= 0.92), None nếu không trùng. Câu quá ngắn (< 10 ký
+    tự chuẩn hoá) bỏ qua để tránh báo nhầm các câu xã giao cực ngắn."""
+    if not cau_chuan or len(cau_chuan) < 10:
+        return None
+    for cau_cu in cac_cau_gan or []:
+        if cau_chuan == cau_cu:
+            return cau_cu
+        if len(cau_cu) >= 10 and difflib.SequenceMatcher(None, cau_chuan, cau_cu).ratio() >= 0.92:
+            return cau_cu
+    return None
+
+
 def process_inbound(db: Session, external_id: str, customer_external_id: str, customer_name: str, content: str,
                     zalo_account_id=None, channel: str = "mo_phong",
                     mentions=None, la_nhom: bool = False, bot_uid: str = "",
@@ -181,7 +251,11 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
         # Hội thoại cũ tạo từ kênh khác: cập nhật theo nguồn tin mới nhất
         conv.channel = channel; db.commit()
     _gan_admin_tu_ban_be(db, cust, conv, customer_external_id)
-    msg = Message(conversation_id=conv.id, external_id=external_id, sender_type="khach", content=content, status="da_nhan")
+    # Đợt Hành vi nhóm: lưu tên NGƯỜI GỬI của riêng tin này (chỉ nhóm — mỗi
+    # thành viên một tên; customer_name của payload nhóm chính là tên người
+    # vừa nhắn). Chat 1-1 để trống. Dùng để ghi nhãn người nói trong lịch sử.
+    msg = Message(conversation_id=conv.id, external_id=external_id, sender_type="khach", content=content, status="da_nhan",
+                  sender_name=(str(customer_name or "") if la_nhom else ""))
     db.add(msg)
     try: db.commit()
     except IntegrityError:
@@ -233,9 +307,13 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
     # GĐ mở rộng 1: thông báo khách mới + tự thu thập thông tin từ tin nhắn.
     # Chạy kể cả khi bot đang tạm dừng (thu thập độc lập với trả lời);
     # mọi lỗi ở bước này chỉ ghi log, không chặn pipeline.
-    if khach_moi:
+    # Đợt Hành vi nhóm (F2): NHÓM CÓ NGỮ CẢNH RIÊNG — nhóm KHÔNG phải lead
+    # bán hàng nên bỏ qua CẢ thông báo khách mới LẪN trích xuất thông tin
+    # cá nhân (tránh thu SĐT/chuyện riêng của thành viên vào hồ sơ nhóm và
+    # tránh "dây" sang ngữ cảnh cá nhân). Chat 1-1 giữ nguyên 100%.
+    if khach_moi and not la_nhom:
         _thong_bao(db, "khach_moi", "Khách hàng mới", f"Khách {cust.display_name or cust.external_id} vừa nhắn tin lần đầu qua kênh {channel}.", cust, conv, "thong_tin", channel)
-    if cai_dat.get("module_thu_thap_thong_tin", True) is not False:
+    if not la_nhom and cai_dat.get("module_thu_thap_thong_tin", True) is not False:
         try:
             kq_thu_thap = extraction_service.extract_and_save(db, cust, msg)
             ten_khach = cust.display_name or cust.external_id
@@ -323,7 +401,9 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
     kich_hoat_hoi = (not intent_hoi and not tu_khoa_hoi) or intent in intent_hoi or any(
         normalize_vi(tk) in chuoi_chuan for tk in tu_khoa_hoi)
     can_hoi_sdt = (not (cust.phone or "").strip()) and kich_hoat_hoi
-    hoi_sdt = (not tu_do) and (cai_dat.get("thu_thap_tu_hoi_sdt", True) is not False) and can_hoi_sdt and not _da_hoi_sdt(db, conv.id)
+    # Đợt Hành vi nhóm (F2): trong NHÓM không bao giờ hỏi xin SĐT (hỏi số cá
+    # nhân giữa nhóm đông người là sai ngữ cảnh), kể cả khi intent khớp.
+    hoi_sdt = (not la_nhom) and (not tu_do) and (cai_dat.get("thu_thap_tu_hoi_sdt", True) is not False) and can_hoi_sdt and not _da_hoi_sdt(db, conv.id)
     # PR chủ động: danh sách dịch vụ đang mở bán để tiêm vào prompt tư vấn
     # (chỉ chế độ tư vấn; giá 0 và không có giá chữ thì bỏ phần giá).
     dich_vu_pr = []
@@ -358,14 +438,23 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
         if getattr(m, "attachment_type", "") == "sticker":
             return True
         return m.sender_type == "bot" and (m.content or "").strip() == "[sticker]"
-    lich_su = [{"role": "user" if m.sender_type == "khach" else "assistant", "content": m.content}
+    # Đợt Hành vi nhóm: lịch sử NHÓM ghi nhãn NGƯỜI NÓI ("Tên: nội dung") —
+    # nhóm có nhiều thành viên, gộp tất cả thành một "user" vô danh khiến AI
+    # tưởng đang nói chuyện với một người và lẫn ngữ cảnh. Chat 1-1 giữ nguyên.
+    def _noi_dung_lich_su(m) -> str:
+        if la_nhom and m.sender_type == "khach":
+            ten = (getattr(m, "sender_name", "") or "").strip()
+            if ten:
+                return f"{ten}: {m.content}"
+        return m.content
+    lich_su = [{"role": "user" if m.sender_type == "khach" else "assistant", "content": _noi_dung_lich_su(m)}
                for m in reversed(dong_ls) if m.content and not _la_tin_sticker(m)]
     try:
         reply, model_used = ai_gateway.generate_reply(
             db, provider, content, chunks, memories,
             goi_y_hoi_sdt=(hoi_sdt and not la_mock), lich_su=lich_su, cai_dat=cai_dat,
             dich_vu=dich_vu_pr, ho_so_khach=(cust.memory_summary or ""),
-            anh_data_uri=anh_data_uri)
+            anh_data_uri=anh_data_uri, luat_nhom=la_nhom)
     except ai_gateway.LoiVision as e:
         # Model phía sau provider KHÔNG hỗ trợ xem ảnh: ghi nhật ký riêng
         # "provider_khong_ho_tro_anh" + đánh dấu lên tin của khách để admin
@@ -391,6 +480,50 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
             return _send_reply(db, conv, cust, cau_du_phong, trace, channel=channel, cai_dat=cai_dat,
                                tin_khach=_tin_khach(customer_external_id, external_id, cli_msg_id, la_nhom))
         return {"trung": False, "trace_id": trace, "tra_loi": None, "ly_do": f"loi_provider: {e}", "conversation_id": conv.id, "customer_id": cust.id}
+    # PHẦN F3: bộ lọc CHỐNG LẶP CÂU — chỉ reply AI sinh qua provider thật ở
+    # kênh cá nhân (1-1 lẫn nhóm), không áp token [BO_QUA] (chốt F1 xử lý).
+    # Trùng -> sinh lại ĐÚNG 1 lần với chỉ dẫn diễn đạt khác hẳn; vẫn trùng
+    # -> NHÓM bỏ qua hẳn, 1-1 vẫn gửi bản lần 2 kèm log cảnh báo.
+    if channel == "ca_nhan" and not la_mock and (reply or "").strip() and (reply or "").strip() != "[BO_QUA]":
+        cau_trung = _tim_cau_trung(_chuan_hoa_cau(reply), _cac_cau_bot_gan_day(db))
+        if cau_trung:
+            db.add(SystemLog(level="warning", module="chong_lap_cau",
+                             message=f"phat_hien_trung_cau conv={conv.id} cau_trung='{cau_trung[:80]}'",
+                             trace_id=trace)); db.commit()
+            chi_dan_lai = (f"Câu bạn vừa định nói đã bị dùng gần đây rồi ('{(reply or '')[:120]}'), "
+                           "hãy nói lại ý đó bằng cách diễn đạt hoàn toàn khác, không dùng lại cụm từ cũ.")
+            try:
+                reply_moi, model_moi = ai_gateway.generate_reply(
+                    db, provider, content, chunks, memories,
+                    goi_y_hoi_sdt=(hoi_sdt and not la_mock), lich_su=lich_su, cai_dat=cai_dat,
+                    dich_vu=dich_vu_pr, ho_so_khach=(cust.memory_summary or ""),
+                    anh_data_uri=anh_data_uri, luat_nhom=la_nhom,
+                    chi_dan_bo_sung=chi_dan_lai)
+                if (reply_moi or "").strip():
+                    reply, model_used = reply_moi, model_moi
+            except Exception as e:
+                db.add(SystemLog(level="warning", module="chong_lap_cau",
+                                 message=f"sinh_lai_that_bai conv={conv.id}: {e}", trace_id=trace)); db.commit()
+            if _tim_cau_trung(_chuan_hoa_cau(reply), _cac_cau_bot_gan_day(db)):
+                if la_nhom:
+                    db.add(SystemLog(level="warning", module="chong_lap_cau",
+                                     message=f"bo_qua_trung_cau_nhom conv={conv.id} cau='{_chuan_hoa_cau(reply)[:80]}'",
+                                     trace_id=trace)); db.commit()
+                    return {"trung": False, "trace_id": trace, "tra_loi": None, "ly_do": "bo_qua_trung_cau",
+                            "conversation_id": conv.id, "customer_id": cust.id}
+                db.add(SystemLog(level="warning", module="chong_lap_cau",
+                                 message=f"van_gui_du_trung_cau_1_1 conv={conv.id} cau='{_chuan_hoa_cau(reply)[:80]}'",
+                                 trace_id=trace)); db.commit()
+    # Đợt Hành vi nhóm (F1): chốt chống rep VỚ VẨN trong nhóm — AI đã được
+    # dặn (luat_nhom) tự trả [BO_QUA] khi tin tag chỉ là chửi/bả/spam không
+    # nội dung. Thấy token này ở lượt NHÓM thì IM LẶNG hẳn: không gửi tin,
+    # không sticker (sticker chỉ chạy trong _send_reply). Lượt 1-1 KHÔNG áp
+    # chốt này — giữ nguyên hành vi hiện tại.
+    if la_nhom and (reply or "").strip() == "[BO_QUA]":
+        db.add(SystemLog(level="info", module="orchestrator",
+                         message=f"bo_qua_nhom_vo_van conv={conv.id}", trace_id=trace)); db.commit()
+        return {"trung": False, "trace_id": trace, "tra_loi": None, "ly_do": "bo_qua_nhom_vo_van",
+                "conversation_id": conv.id, "customer_id": cust.id}
     if hoi_sdt:
         if la_mock:
             cau_hoi = str(cai_dat.get("thu_thap_cau_hoi_sdt") or CAU_HOI_SDT_MAC_DINH)
@@ -404,10 +537,11 @@ def process_inbound(db: Session, external_id: str, customer_external_id: str, cu
     ket_qua_gui = _send_reply(db, conv, cust, reply, trace, chunks=chunks, model_used=model_used, intent=intent, channel=channel,
                               cai_dat=cai_dat, tin_khach=_tin_khach(customer_external_id, external_id, cli_msg_id, la_nhom))
     # Bộ nhớ dài hạn: đủ số tin mới thì tóm tắt gộp hồ sơ khách (chỉ chế độ tư
-    # vấn; hàm tự nuốt lỗi, không chặn pipeline).
+    # vấn; hàm tự nuốt lỗi, không chặn pipeline). Lượt NHÓM truyền la_nhom để
+    # tóm tắt theo kiểu CỐT LÕI CẤP NHÓM (không hồ sơ cá nhân) — đợt F2.
     if not tu_do:
         try:
-            memory_service.cap_nhat_tom_tat_bo_nho(db, cust, cai_dat)
+            memory_service.cap_nhat_tom_tat_bo_nho(db, cust, cai_dat, la_nhom=la_nhom)
         except Exception:
             pass
     return ket_qua_gui
@@ -690,6 +824,20 @@ def thuc_hien_tin_nhan_them(conversation_id, message_id_cua_luot_bot):
         noi_dung = (noi_dung or "").strip()
         if not noi_dung or noi_dung == "[BO_QUA]":
             return _huy("ai_bo_qua")
+        # PHẦN F3: tin nhắn thêm cũng qua bộ lọc chống lặp câu — trùng với
+        # câu bot đã gửi gần đây (toàn hệ thống) thì HỦY như các lý do hủy
+        # khác, KHÔNG sinh lại (tin phụ không đáng tốn thêm lượt AI).
+        if provider and provider.provider != "mock":
+            cau_trung_nt = _tim_cau_trung(_chuan_hoa_cau(noi_dung), _cac_cau_bot_gan_day(db))
+            if cau_trung_nt:
+                try:
+                    db.add(SystemLog(level="warning", module="chong_lap_cau",
+                                     message=f"nhan_them_trung_cau conv={conv.id} cau_trung='{cau_trung_nt[:80]}'",
+                                     trace_id=trace))
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                return _huy("trung_cau_gan_day")
         ket_qua = _send_reply(db, conv, cust, noi_dung, trace, model_used=model_used,
                               channel="ca_nhan", cai_dat=cai_dat, tin_khach=None,
                               la_tin_nhan_them=True)
@@ -936,8 +1084,11 @@ def _send_reply(db, conv, cust, reply, trace, chunks=None, model_used="", rule=N
     if channel == "ca_nhan" and not la_tin_nhan_them and id_tin_bot_cuoi:
         if not (tin_khach and tin_khach.get("loai_thread")):
             _len_lich_tin_nhan_them(db, conv, cd, id_tin_bot_cuoi, trace)
-    # Cập nhật bộ nhớ: ghi sự kiện tương tác
-    if cd.get("module_bo_nho_ai", True) is not False:
+    # Cập nhật bộ nhớ: ghi sự kiện tương tác. Đợt Hành vi nhóm (F2): lượt
+    # NHÓM (tin_khach loai_thread=1) KHÔNG ghi sự kiện "Khách đã hỏi…" —
+    # tránh nhồi sự kiện rác vào bộ nhớ nhóm (nhóm chỉ nhớ cốt lõi qua bản
+    # tóm tắt riêng). Chat 1-1 giữ nguyên.
+    if cd.get("module_bo_nho_ai", True) is not False and not (tin_khach and tin_khach.get("loai_thread")):
         memory_service.remember(db, cust.id, f"Khách đã hỏi và được trả lời: {reply[:120]}", memory_type="su_kien", source="orchestrator", confidence=0.7)
     db.add(SystemLog(level="info", module="orchestrator", message=f"Đã trả lời hội thoại {conv.id} model={model_used} so_phan_tin={len(cac_phan)}", trace_id=trace)); db.commit()
     return {**ket_qua_chung, "tra_loi": reply, "so_phan_tin": len(cac_phan), "tin_bot_id": id_tin_bot_cuoi}

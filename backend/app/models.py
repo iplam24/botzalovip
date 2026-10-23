@@ -65,6 +65,10 @@ class Message(Base):
     id = Column(Integer, primary_key=True); conversation_id = Column(Integer, ForeignKey("conversations.id"), index=True)
     external_id = Column(String, nullable=True, index=True)  # chống trùng
     sender_type = Column(String, default="khach")  # khach, bot, nhan_vien, he_thong
+    # Tên người gửi TỪNG tin (chỉ điền cho tin NHÓM: mỗi thành viên một tên;
+    # chat 1-1 để trống vì đã biết là chính khách đó). Dùng để ghi nhãn
+    # người nói khi dựng lịch sử nhóm cho AI (đợt Hành vi nhóm).
+    sender_name = Column(String, default="")
     content = Column(Text, default=""); status = Column(String, default="da_gui")
     # Đính kèm (ảnh khách gửi): attachment_type: "" | "anh";
     # attachment_url: "/api/tep/<tên file>" nếu đã tải về máy chủ, hoặc URL gốc của Zalo khi tải lỗi.

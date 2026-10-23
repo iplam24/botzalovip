@@ -67,6 +67,11 @@ def seed():
         if "attachment_type" not in msg_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE messages ADD COLUMN attachment_type VARCHAR DEFAULT ''"))
+        # Đợt Hành vi nhóm: tên người gửi từng tin trong NHÓM (ghi nhãn
+        # người nói cho lịch sử nhóm). VARCHAR hợp lệ cả Postgres lẫn SQLite.
+        if "sender_name" not in msg_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE messages ADD COLUMN sender_name VARCHAR DEFAULT ''"))
         # Trên Postgres (image pgvector): thử bật extension vector để sẵn sàng
         # cho nâng cấp sau. Việc truy hồi hiện tại vẫn dùng JSON + cosine Python
         # (đã ghi rõ trong BAO_CAO) nên bật extension thất bại cũng KHÔNG sao.

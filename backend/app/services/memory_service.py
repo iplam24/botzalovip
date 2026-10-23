@@ -103,9 +103,24 @@ def _moc_da_tom_tat(db: Session, customer_id) -> int:
         return 0
 
 
-def _tom_tat_quy_tac(db: Session, customer, tin_moi) -> str:
+def _tom_tat_quy_tac(db: Session, customer, tin_moi, la_nhom: bool = False) -> str:
     """Tóm tắt bằng quy tắc (dùng khi provider là Mock/mô phỏng): dựng hồ sơ từ
-    thông tin đã thu thập + hồ sơ khách + vài tin gần nhất — không để trống."""
+    thông tin đã thu thập + hồ sơ khách + vài tin gần nhất — không để trống.
+
+    Lượt NHÓM (la_nhom=True, đợt Hành vi nhóm F2): bản quy tắc cũng chỉ giữ
+    CỐT LÕI CẤP NHÓM — bỏ hẳn SĐT + thông tin thu thập cá nhân, chỉ nêu tên
+    nhóm + vài trao đổi chung gần nhất kèm tên người nói."""
+    if la_nhom:
+        cac_phan = []
+        if (customer.display_name or "").strip():
+            cac_phan.append(f"Nhóm {customer.display_name.strip()}")
+        if tin_moi:
+            cac_phan.append("Trao đổi gần đây trong nhóm: " + "; ".join(
+                f'{(getattr(m, "sender_name", "") or "Thành viên")}: "{(m.content or "")[:60]}"'
+                for m in tin_moi[-3:]))
+        if not cac_phan:
+            return ""
+        return ". ".join(cac_phan) + "."
     cac_phan = []
     if (customer.display_name or "").strip():
         cac_phan.append(f"Khách {customer.display_name.strip()}")
@@ -130,26 +145,47 @@ def _tom_tat_quy_tac(db: Session, customer, tin_moi) -> str:
     return ". ".join(cac_phan) + "."
 
 
-def _tom_tat_bang_ai(db: Session, provider, customer, tom_tat_cu: str, tin_moi) -> str:
+def _tom_tat_bang_ai(db: Session, provider, customer, tom_tat_cu: str, tin_moi, la_nhom: bool = False) -> str:
     """Gọi provider AI thật để tóm tắt gộp hồ sơ cũ + tin mới. Lỗi thì ném ra
-    để hàm gọi quyết định bỏ qua (không chặn pipeline trả lời khách)."""
+    để hàm gọi quyết định bỏ qua (không chặn pipeline trả lời khách).
+
+    Lượt NHÓM (la_nhom=True, đợt Hành vi nhóm F2): dùng chỉ dẫn RIÊNG cho
+    nhóm — chỉ giữ thông tin CỐT LÕI CẤP NHÓM, tuyệt đối không ghi thông
+    tin cá nhân của từng thành viên."""
     from . import ai_gateway
     from ..security import decrypt_secret
     from ..models import AIUsage
     key = decrypt_secret(provider.api_key_encrypted)
     if not key or not provider.base_url:
         raise ai_gateway.AIError("Chưa cấu hình khóa API/địa chỉ API để tóm tắt bộ nhớ")
-    transcript = "\n".join(f"Khách: {m.content}" for m in tin_moi if m.content)
-    noi_dung = (
-        f"Hồ sơ tóm tắt hiện tại:\n{tom_tat_cu or '(chưa có)'}\n\n"
-        f"Tin nhắn mới của khách:\n{transcript}\n\n"
-        "Hãy viết HỒ SƠ TÓM TẮT MỚI (gộp hồ sơ cũ với tin mới, bỏ trùng lặp), tối đa khoảng 120 từ, gồm: "
-        "định danh/tên nếu biết, nhu cầu và sở thích, đã hỏi/mua những gì, điểm cần lưu ý, việc đang dang dở. "
-        "Chỉ viết đúng hồ sơ, không giải thích, không chào hỏi."
-    )
+    if la_nhom:
+        transcript = "\n".join(
+            f"{(getattr(m, 'sender_name', '') or 'Thành viên')}: {m.content}" for m in tin_moi if m.content)
+        noi_dung = (
+            f"Bản tóm tắt cốt lõi hiện tại của NHÓM:\n{tom_tat_cu or '(chưa có)'}\n\n"
+            f"Tin nhắn mới trong nhóm:\n{transcript}\n\n"
+            "Hãy viết BẢN TÓM TẮT CỐT LÕI MỚI CỦA NHÓM (gộp bản cũ với tin mới, bỏ trùng lặp), tối đa khoảng 120 từ, "
+            "CHỈ gồm thông tin cốt lõi CẤP NHÓM: nhóm này là nhóm gì/chủ đề chính, luật lệ hoặc thỏa thuận chung "
+            "được nhắc trong nhóm, quyết định/thông tin chung quan trọng. "
+            "TUYỆT ĐỐI KHÔNG ghi thông tin cá nhân của từng thành viên (tên riêng kèm số điện thoại, nhu cầu mua "
+            "hàng cá nhân, chuyện riêng tư). Chỉ viết đúng bản tóm tắt, không giải thích, không chào hỏi."
+        )
+        he_thong = ("Bạn là hệ thống ghi nhớ thông tin cốt lõi của nhóm chat. Chỉ ghi thông tin cấp nhóm, "
+                    "tuyệt đối không ghi thông tin cá nhân của từng thành viên, chỉ dựa trên dữ kiện được "
+                    "cung cấp, tuyệt đối không bịa thêm.")
+    else:
+        transcript = "\n".join(f"Khách: {m.content}" for m in tin_moi if m.content)
+        noi_dung = (
+            f"Hồ sơ tóm tắt hiện tại:\n{tom_tat_cu or '(chưa có)'}\n\n"
+            f"Tin nhắn mới của khách:\n{transcript}\n\n"
+            "Hãy viết HỒ SƠ TÓM TẮT MỚI (gộp hồ sơ cũ với tin mới, bỏ trùng lặp), tối đa khoảng 120 từ, gồm: "
+            "định danh/tên nếu biết, nhu cầu và sở thích, đã hỏi/mua những gì, điểm cần lưu ý, việc đang dang dở. "
+            "Chỉ viết đúng hồ sơ, không giải thích, không chào hỏi."
+        )
+        he_thong = "Bạn là hệ thống ghi nhớ khách hàng. Viết hồ sơ tóm tắt ngắn gọn, chính xác, chỉ dựa trên dữ kiện được cung cấp, tuyệt đối không bịa thêm."
     payload = {"model": provider.model, "stream": False, "temperature": 0.3, "max_tokens": 500,
                "messages": [
-                   {"role": "system", "content": "Bạn là hệ thống ghi nhớ khách hàng. Viết hồ sơ tóm tắt ngắn gọn, chính xác, chỉ dựa trên dữ kiện được cung cấp, tuyệt đối không bịa thêm."},
+                   {"role": "system", "content": he_thong},
                    {"role": "user", "content": noi_dung}]}
     with ai_gateway.http_client(timeout=provider.timeout or 30) as client:
         r = client.post(f"{provider.base_url.rstrip('/')}/chat/completions",
@@ -168,7 +204,7 @@ def _tom_tat_bang_ai(db: Session, provider, customer, tom_tat_cu: str, tin_moi) 
     return text
 
 
-def cap_nhat_tom_tat_bo_nho(db: Session, customer, cai_dat: dict = None, force: bool = False):
+def cap_nhat_tom_tat_bo_nho(db: Session, customer, cai_dat: dict = None, force: bool = False, la_nhom: bool = False):
     """Tóm tắt gộp hồ sơ dài hạn cho khách khi đủ số tin mới (hoặc force=True).
 
     Trả về hồ sơ mới nếu đã tóm tắt, None nếu chưa đủ tin / lỗi AI (bỏ qua,
@@ -205,14 +241,14 @@ def cap_nhat_tom_tat_bo_nho(db: Session, customer, cai_dat: dict = None, force: 
         provider = ai_gateway.get_default_provider(db)
         if provider and provider.provider != "mock":
             try:
-                tom_tat = _tom_tat_bang_ai(db, provider, customer, customer.memory_summary or "", tin_moi)
+                tom_tat = _tom_tat_bang_ai(db, provider, customer, customer.memory_summary or "", tin_moi, la_nhom=la_nhom)
             except Exception as e:
                 db.add(SystemLog(level="warning", module="bo_nho",
                                  message=f"Tóm tắt bộ nhớ bằng AI thất bại cho khách {customer.id}: {e}"))
                 db.commit()
                 return None
         else:
-            tom_tat = _tom_tat_quy_tac(db, customer, tin_moi)
+            tom_tat = _tom_tat_quy_tac(db, customer, tin_moi, la_nhom=la_nhom)
         if not tom_tat:
             return None
         customer.memory_summary = tom_tat
