@@ -376,7 +376,20 @@ def parse_chat_response(raw_text: str, content_type: str = ""):
     raise AIError("Không phân tích được phản hồi từ nhà cung cấp AI (không phải JSON cũng không phải SSE hợp lệ)")
 
 def get_default_provider(db: Session):
-    return db.query(AIProviderConfig).filter(AIProviderConfig.is_default == True, AIProviderConfig.is_active == True).first() or db.query(AIProviderConfig).filter(AIProviderConfig.is_active == True).first()
+    """Provider mặc định: ưu tiên provider THẬT đang bật + là mặc định.
+
+    Mock (mô phỏng) không bao giờ được thắng một provider thật: dữ liệu cũ
+    từng có lúc 2 provider cùng is_default=True (kể cả Mock) khiến bot trả
+    lời bằng câu mẫu mô phỏng trên môi trường thật. Thứ tự ưu tiên:
+    mặc định + thật -> thật đang bật -> mặc định bất kỳ -> đang bật bất kỳ.
+    """
+    q = db.query(AIProviderConfig).filter(AIProviderConfig.is_active == True)
+    return (q.filter(AIProviderConfig.is_default == True, AIProviderConfig.provider != "mock")
+             .order_by(AIProviderConfig.id).first()
+            or q.filter(AIProviderConfig.provider != "mock")
+             .order_by(AIProviderConfig.is_default.desc(), AIProviderConfig.id).first()
+            or q.filter(AIProviderConfig.is_default == True).order_by(AIProviderConfig.id).first()
+            or q.order_by(AIProviderConfig.id).first())
 
 CHI_DAN_LUAT_NHOM = (
     "Đây là tin trong NHÓM nhiều người. Nếu tin nhắn tag bạn chỉ là chửi thề, xúc phạm, "
